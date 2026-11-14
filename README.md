@@ -96,6 +96,16 @@ Python 3.12.10 in a Docker base image pinned by digest; NumPy 2.3.5, SciPy 1.17.
 0.14.6 and their dependencies pinned by version and hash. GitHub Actions rebuilds the image and runs
 the self-test on every change, and re-downloads and verifies the abstracts once a month.
 
+## The second figure (AI rewrites)
+
+The page's second figure tests the detector on AI-rewritten abstracts: each of the 250 sampled 2020
+abstracts was sent once to Claude Opus 5.5 (Anthropic Message Batches API, default settings, no system
+prompt) with the instruction quoted in `manifests/validation_rewrite.json`; 12 requests were declined
+by Anthropic's safety filter and the 238 rewrites were scored with pangram-4.1. The rewrites are copies
+of ASH's abstracts, so they are not published; the manifest holds the counts the figure shows, and
+`scripts/validation_summary.py` is the script that produced it from the run's files. Re-running it
+needs your own Anthropic and Pangram keys (about $5 and $65 at list prices).
+
 ## Changes
 
 * **2026-11-14, cleaning fix.** The 2025 export often runs section labels into the first sentence

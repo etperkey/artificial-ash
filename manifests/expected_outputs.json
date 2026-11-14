@@ -2,8 +2,8 @@
   "about": "SHA-256 of the outputs built on the study machine from the original Pangram responses. `reproduce.py analyze` compares against these when ASH_BUILD_DATE equals build_date.",
   "build_date": "2026-11-14",
   "sha256": {
-    "public_dashboard/index.html": "9b3f46cf53def18914d594d2d14cb2bcb2d53e9f02497836629f8895d0dc783a",
-    "public_dashboard/passages/index.html": "253bc8077c5611135c34d24c1e19463b8f57707493b6bdb6e6e1f85d0f0026cb",
+    "public_dashboard/index.html": "37ab0a0d31d9a6dccf9af3a2047e67a666158b207622336b744a1efb22232a57",
+    "public_dashboard/passages/index.html": "46931e86c070547cc268d866bfffe396eea63b43bbdd7e14f4d68d8b56884d59",
     "results/pilot_summary.md": "b9ef4d9787160f1bc520c289fa391aadbf106a1ca7fec40da80a68e6d861ae0a"
   }
 }

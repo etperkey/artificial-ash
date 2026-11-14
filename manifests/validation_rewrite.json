@@ -1,0 +1,42 @@
+{
+  "arm": "rewrite_claude_opus55_2020",
+  "date": "2026-11-14",
+  "source": "the scored ASH 2020 sample abstracts, as cleaned for the study",
+  "generator": {
+    "model": "claude-opus-5-5",
+    "model_name": "Claude Opus 5.5",
+    "interface": "POST /v1/messages/batches",
+    "effort": "medium",
+    "system_prompt": null,
+    "prompt": "Rewrite the abstract below in your own words. Keep every finding, number, statistic, drug or gene name, and conclusion exactly as in the original; do not add, remove or invent any information. Keep the same paragraph breaks and about the same length. Reply with the rewritten abstract only.",
+    "prompt_sha256": "b0394be0fb73ce09ac3185bf215cb2f014e501df00279bfd8105f96a4ccf55dd"
+  },
+  "detector": "pangram-4.1",
+  "n_requested": 250,
+  "n_refused": 12,
+  "refusal_categories": {
+    "bio": 12
+  },
+  "n_scored": 238,
+  "labels": {
+    "AI": 0,
+    "Mixed": 106,
+    "Human": 132
+  },
+  "originals_same_abstracts": {
+    "AI": 0,
+    "Mixed": 0,
+    "Human": 238
+  },
+  "flagged_ci95": [
+    0.3836,
+    0.5089
+  ],
+  "share_ai_median": 0.0677,
+  "windows": {
+    "Human Written": 1451,
+    "AI-Assisted": 414,
+    "AI-Generated": 1
+  },
+  "spearman_wording_kept_vs_share_ai": -0.385
+}

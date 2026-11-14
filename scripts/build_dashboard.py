@@ -261,6 +261,10 @@ def main():
             "hl": {str(r["year"]): hl_by_year.get(r["year"], 0) for r in rows if r["status"] == "scored"},
             "hl_lab": dict(sorted(Counter(p["lab"] for p in passages).items())),
             "terms": terms}
+    # second figure: counts from the AI-rewrite validation run (the rewrites themselves are not public)
+    vpath = os.path.join(ROOT, "manifests", "validation_rewrite.json")
+    if os.path.exists(vpath):
+        data["validation"] = json.load(open(vpath, encoding="utf-8"))
     pas_data = {"updated": updated, "model": "Pangram 4.1",
                 "rows": [{"year": r["year"], "n": r["n"]} for r in rows if r["status"] == "scored"],
                 "passages": passages}
@@ -318,21 +322,21 @@ HEAD = r"""<!doctype html>
 :root{
   --bg:#fbfaf7; --panel:#ffffff; --ink:#1a1a1a; --ink2:#52514e; --mute:#7a786f; --rule:#e5e2db;
   --grid:#ecebe6; --axis:#c3c2b7; --link:#2a4a7a; --chip:#efece6; --note:#f6efe2; --note-ink:#6b4a12;
-  --s1:#2a78d6; --s2:#eb6834; --ring:rgba(11,11,11,.10);
+  --s1:#2a78d6; --s2:#eb6834; --s3:#8f8c84; --ring:rgba(11,11,11,.10);
   --hl:rgba(236,178,20,.34); --hl-soft:rgba(236,178,20,.13); --hl-edge:#a87a00; --find:#2a4a7a;
 }
 @media (prefers-color-scheme: dark){
   :root:not([data-theme="light"]){
     --bg:#15161a; --panel:#1c1e23; --ink:#e8e6e1; --ink2:#c3c2b7; --mute:#9a948a; --rule:#2a2d33;
     --grid:#2a2c31; --axis:#3b3d43; --link:#8ab0e0; --chip:#262830; --note:#2a2419; --note-ink:#e7c78f;
-    --s1:#3987e5; --s2:#d95926; --ring:rgba(255,255,255,.10);
+    --s1:#3987e5; --s2:#d95926; --s3:#6a6c73; --ring:rgba(255,255,255,.10);
     --hl:rgba(240,186,60,.27); --hl-soft:rgba(240,186,60,.10); --hl-edge:#e0b04a; --find:#8ab0e0;
   }
 }
 :root[data-theme="dark"]{
   --bg:#15161a; --panel:#1c1e23; --ink:#e8e6e1; --ink2:#c3c2b7; --mute:#9a948a; --rule:#2a2d33;
   --grid:#2a2c31; --axis:#3b3d43; --link:#8ab0e0; --chip:#262830; --note:#2a2419; --note-ink:#e7c78f;
-  --s1:#3987e5; --s2:#d95926; --ring:rgba(255,255,255,.10);
+  --s1:#3987e5; --s2:#d95926; --s3:#6a6c73; --ring:rgba(255,255,255,.10);
   --hl:rgba(240,186,60,.27); --hl-soft:rgba(240,186,60,.10); --hl-edge:#e0b04a; --find:#8ab0e0;
 }
 *{box-sizing:border-box}
@@ -385,6 +389,17 @@ th{color:var(--mute);font-weight:600;font-size:12.5px}
 .prose ul{padding-left:20px;margin:6px 0 12px}
 .fine{color:var(--mute);font:13.5px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;margin-top:28px;border-top:1px solid var(--rule);padding-top:14px}
 .hit.go{cursor:pointer}
+/* figure 2: the detector on AI rewrites */
+.vfig{position:relative;margin:12px 0 2px}
+.vrow{margin:0 0 16px}
+.vname{font:600 14px/1.35 system-ui,-apple-system,"Segoe UI",sans-serif;color:var(--ink);margin:0 0 6px}
+.vbar{display:flex;gap:2px;height:26px}
+.vseg{height:100%;min-width:3px;outline:none;cursor:default}
+.vseg:first-child{border-radius:4px 0 0 4px}.vseg:last-child{border-radius:0 4px 4px 0}.vseg:only-child{border-radius:4px}
+.vseg:focus-visible{outline:2px solid var(--link);outline-offset:2px}
+.vnums{font:13.5px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif;color:var(--ink2);margin-top:6px}
+.vnums b{color:var(--ink);font-variant-numeric:tabular-nums;font-weight:650}
+@media (forced-colors:active){.vseg{forced-color-adjust:none;border:1px solid CanvasText}}
 .golink{display:inline-block;font:600 15px system-ui,-apple-system,"Segoe UI",sans-serif;color:var(--link);margin:4px 0 2px}
 [hidden]{display:none!important}
 /* words and phrases */
@@ -456,6 +471,15 @@ MAIN_BODY = r"""<body>
   <details><summary>Show the data table</summary><div class="tablewrap"><table id="tbl"></table></div></details>
 </section>
 
+<section class="card" id="val" aria-labelledby="v-h">
+  <h2 id="v-h">How the detector labels abstracts rewritten by AI</h2>
+  <p class="cap" id="v-cap"></p>
+  <div class="legend" aria-hidden="true"><span><i style="background:var(--s1)"></i>AI-written</span><span><i style="background:var(--s2)"></i>Partly AI-written</span><span><i style="background:var(--s3)"></i>Human-written</span></div>
+  <div id="vfig" class="vfig"></div>
+  <p class="cap" id="v-read" style="margin-top:2px"></p>
+  <details><summary>Show the data table</summary><div class="tablewrap"><table id="vtbl"></table></div></details>
+</section>
+
 <section class="card" aria-labelledby="w-h">
   <h2 id="w-h">Words and phrases the highlighted passages lean on</h2>
   <p class="cap" id="w-rule"></p>
@@ -483,11 +507,12 @@ MAIN_BODY = r"""<body>
     <li><b>Words and phrases.</b> Every single word and run of two or three words was tested twice with Fisher's exact test (two-sided). The first test, for terms used at least 10 times, compares how often a term occurs in the highlighted versus the unhighlighted text of the <span class="era"></span> abstracts. The second, for terms found in at least 10 abstracts, compares how many abstracts contain the term in the latest year versus 2020&ndash;2021. Each test's p-values are adjusted across all terms tested (Benjamini&ndash;Hochberg). A term is listed only if it passes both tests, appears in at least 6 different highlighted abstracts and is more than 5 times as common in highlighted as in unhighlighted text; those two cut-offs were applied after the tests, to keep the list short. &ldquo;Times as common&rdquo; compares the term's rate per word in the two kinds of text, with 0.5 added to the unhighlighted count so that rare terms are not overstated. When a phrase turns up in nearly the same abstracts as a shorter term inside it, only the shorter term is listed. The list is exploratory. The detector may highlight a passage partly because it contains words like these, so the list describes highlighted passages; it does not show which words AI writes. Repeats of a word within one abstract make the first test optimistic, and most highlighted abstracts are from 2025, so changes in writing style over the years play a part too. With 250 abstracts a year, rarer style words may not reach significance.</li>
     <li><b>Baseline.</b> ASH 2020 and 2021 abstracts were submitted in August of those years, more than a year before ChatGPT launched on 30 November 2022, though earlier tools such as GPT-3, Grammarly and DeepL already existed. <span id="basetxt"></span></li>
     <li><b>Statistics.</b> Wilson 95% intervals for each share. Each later year is compared with 2020 and 2021 combined by Fisher's exact test; p-values are adjusted for the number of comparisons (Benjamini&ndash;Hochberg).</li>
+    <li id="v-mli"><b>Testing the detector (second figure).</b> <span id="v-method"></span></li>
   </ul>
   <h2>How to read it</h2>
   <ul>
     <li>A flag is a detector's judgment, not proof. It says nothing about whether the science is sound or whether AI use broke any rule; using AI to polish English is common and usually allowed.</li>
-    <li>How well the detector catches AI text in short, number-heavy clinical abstracts has not yet been measured here. Tests on abstracts deliberately written or edited by AI are planned.</li>
+    <li>The second figure is a first measure of how well the detector catches AI text in these abstracts, for one kind of AI use and one AI model. Tests of light AI editing, of abstracts written by AI from the results alone, and of other AI models are planned.</li>
     <li>With 250 abstracts a year, each share is uncertain by several percentage points either way; the whiskers show how much.</li>
     <li>Highlighted passages are shown without titles, authors, abstract numbers or links, and not in abstract-number order. Trial registration numbers and pasted title lines are masked, and text the detector did not highlight is reduced to a word count. Passages can still name an institution, a study or a data set. Full per-abstract results are not published.</li>
   </ul>
@@ -694,6 +719,70 @@ document.querySelectorAll('.era').forEach(e => { e.textContent = `${TERMS.rule.e
     kind = k; all = false; Object.entries(tabs).forEach(([k2, b2]) => b2.setAttribute('aria-selected', String(k2 === k))); render(); }));
   $('wt-more').onclick = () => { all = !all; render(); };
   render();
+})();
+
+// ---- second figure: the detector on AI rewrites of the 2020 abstracts ----
+(function(){
+  const V = DATA.validation;
+  if (!V) { $('val').hidden = true; $('v-mli').hidden = true; return; }
+  const G = V.generator, L = V.labels, O = V.originals_same_abstracts, n = V.n_scored;
+  const pc = (k, t) => pct(k, t, k === 0 || k === t ? 0 : 1);
+  const ci = x => (100 * x).toFixed(0);
+  const flag = L.AI + L.Mixed;
+  const cats = Object.keys(V.refusal_categories).join(', ');
+  $('v-cap').textContent = `${G.model_name} rewrote each of the ${V.n_requested} sampled 2020 abstracts in its own words, keeping every fact; Anthropic's safety filter declined ${V.n_refused}. Both bars show the same ${n} abstracts. Hover or tab to a segment for the counts.`;
+  $('v-read').textContent = `The detector labeled ${L.AI ? pc(L.AI, n) : 'none'} of the rewrites AI-written. It labeled ${pc(L.Mixed, n)} partly AI-written and passed the other ${pc(L.Human, n)} as human-written (flagged: 95% interval ${ci(V.flagged_ci95[0])}–${ci(V.flagged_ci95[1])}%). In this test it caught about half of the AI rewrites and called them partly AI-written, never AI-written, so the 2025 share flagged above probably understates how much AI was used.`;
+  $('v-method').textContent = `Each of the ${V.n_requested} sampled 2020 abstracts was sent once to ${G.model_name} (${G.model}) through Anthropic's batch API, with default settings and no system prompt, as this instruction followed by the abstract: "${G.prompt}" Anthropic's safety filter declined ${V.n_refused} requests (category: ${cats}). The ${n} rewrites were scored with the same detector and settings as the meeting abstracts. They are not published, because they are copies of ASH's abstracts. An earlier request asked the AI to rewrite the abstracts so that the detector would judge them human-written; it declined, and that test was dropped.`;
+
+  const SEG = [['AI', 'AI-written', '--s1', 'AI-written'], ['Mixed', 'Partly AI-written', '--s2', 'partly AI-written'],
+               ['Human', 'Human-written', '--s3', 'human-written']];
+  const rows = [{name: `As written for ASH 2020`, c: O}, {name: `Rewritten by ${G.model_name}`, c: L}];
+  const box = $('vfig');
+  const tip2 = document.createElement('div'); tip2.className = 'tip'; tip2.setAttribute('role', 'tooltip'); box.appendChild(tip2);
+  const div = (cls, txt) => { const d = document.createElement('div'); if (cls) d.className = cls; if (txt !== undefined) d.textContent = txt; return d; };
+  rows.forEach(r => {
+    const tot = r.c.AI + r.c.Mixed + r.c.Human;
+    const row = div('vrow'), bar = div('vbar');
+    row.appendChild(div('vname', `${r.name} (${tot} abstracts)`));
+    bar.setAttribute('role', 'img');
+    bar.setAttribute('aria-label', `${r.name}: ` + SEG.map(([k, , , low]) => `${pc(r.c[k], tot)} ${low}`).join(', '));
+    SEG.forEach(([k, lab, col]) => {
+      if (!r.c[k]) return;
+      const s = div('vseg');
+      s.style.flex = `${r.c[k]} 1 0`; s.style.background = `var(${col})`; s.tabIndex = 0;
+      s.setAttribute('aria-label', `${lab}: ${r.c[k]} of ${tot} (${pc(r.c[k], tot)})`);
+      const show = ev => {
+        tip2.replaceChildren();
+        const h = div('h', r.name); tip2.appendChild(h);
+        const line = div('row'); const a = document.createElement('span'); const key = document.createElement('i');
+        key.className = 'key'; key.style.background = `var(${col})`; a.append(key, document.createTextNode(lab));
+        const b = document.createElement('b'); b.textContent = `${pc(r.c[k], tot)} (${r.c[k]} of ${tot})`; line.append(a, b); tip2.appendChild(line);
+        const bb = box.getBoundingClientRect(), sr = s.getBoundingClientRect();
+        tip2.style.opacity = 1;
+        let x = (ev && ev.clientX ? ev.clientX : sr.left + sr.width / 2) - bb.left + 12;
+        if (x + tip2.offsetWidth > bb.width) x = Math.max(0, bb.width - tip2.offsetWidth);
+        tip2.style.left = x + 'px'; tip2.style.top = (sr.bottom - bb.top + 6) + 'px';
+      };
+      const hide = () => { tip2.style.opacity = 0; };
+      s.addEventListener('pointermove', show); s.addEventListener('pointerleave', hide);
+      s.addEventListener('focus', () => show(null)); s.addEventListener('blur', hide);
+      bar.appendChild(s);
+    });
+    row.appendChild(bar);
+    const nums = div('vnums');
+    SEG.forEach(([k, , , low], i) => {
+      if (i) nums.appendChild(document.createTextNode(' · '));
+      const b = document.createElement('b'); b.textContent = pc(r.c[k], tot);
+      nums.append(b, document.createTextNode(` ${low}`));
+    });
+    row.appendChild(nums);
+    box.appendChild(row);
+  });
+  const t = $('vtbl'), hd = t.createTHead().insertRow();
+  ['Abstracts', 'Scored', 'AI-written', 'Partly AI-written', 'Human-written'].forEach(x => { const th = document.createElement('th'); th.textContent = x; hd.appendChild(th); });
+  const tb = t.createTBody();
+  rows.forEach(r => { const tot = r.c.AI + r.c.Mixed + r.c.Human, tr = tb.insertRow();
+    [r.name, tot, ...SEG.map(([k]) => `${r.c[k]} (${pc(r.c[k], tot)})`)].forEach(v => { tr.insertCell().textContent = v; }); });
 })();
 
 draw();
