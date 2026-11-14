@@ -19,6 +19,7 @@ Usage:
   python -I pangram_replay.py rehydrate  --replay replay   --results results  # anyone with the replay files
 """
 import argparse
+import csv
 import glob
 import hashlib
 import json
@@ -102,7 +103,7 @@ def strip(results, out, root):
         print(f"{name}: {len(recs)} responses stripped -> {dest}")
 
 
-def rehydrate(replay, results, root):
+def rehydrate(replay, results, root, expect):
     samples = load_samples(root)
     if not samples:
         raise SystemExit("no data/samples found; run `python -I reproduce.py data` first")
@@ -111,6 +112,7 @@ def rehydrate(replay, results, root):
     if not files:
         raise SystemExit(f"no *.replay.jsonl files in {replay}")
     total = 0
+    per_year = {}
     for p in files:
         name = os.path.basename(p)[: -len(".replay.jsonl")]
         raw_lines, score_lines = [], []
@@ -147,12 +149,21 @@ def rehydrate(replay, results, root):
             rec = {"id": r["id"], "year": row["year"], "task_id": r["task_id"], "model": MODEL,
                    "stage": res.get("stage"), "n_words": row["n_words"], **{k: res.get(k) for k in KEEP}}
             score_lines.append(json.dumps(rec, ensure_ascii=False))
+            per_year[row["year"]] = per_year.get(row["year"], 0) + 1
         for suffix, lines in (("raw", raw_lines), ("scores", score_lines)):
             dest = os.path.join(results, f"{name}.{suffix}.jsonl")
             with open(dest, "w", encoding="utf-8", newline="\n") as f:
                 f.write("\n".join(lines) + "\n")
         total += len(raw_lines)
         print(f"{name}: {len(raw_lines)} Pangram responses restored and verified")
+    # every year the study scored must come back complete
+    man = expect
+    if man != "none":
+        want = {int(r["year"]): int(r["n"]) for r in csv.DictReader(open(man, encoding="utf-8", newline=""))}
+        if per_year != want:
+            raise SystemExit(f"incomplete replay set: restored {per_year}, the study scored {want}")
+    with open(os.path.join(results, "REHYDRATED"), "w", encoding="utf-8", newline="\n") as f:
+        f.write("These results were rebuilt from the study's replay files, not scored anew.\n")
     print(f"REHYDRATED: {total} responses, every text hash matched")
 
 
@@ -171,11 +182,13 @@ def main():
     ap.add_argument("--replay", default=os.path.join(ROOT, "replay"))
     ap.add_argument("--out", default=os.path.join(ROOT, "replay"))
     ap.add_argument("--root", default=ROOT)
+    ap.add_argument("--expect", default=os.path.join(ROOT, "manifests", "results_summary.csv"),
+                    help="per-year counts the restored set must match ('none' to skip; tests only)")
     a = ap.parse_args()
     if a.cmd == "strip":
         strip(a.results, a.out, a.root)
     else:
-        rehydrate(a.replay, a.results, a.root)
+        rehydrate(a.replay, a.results, a.root, a.expect)
 
 
 if __name__ == "__main__":

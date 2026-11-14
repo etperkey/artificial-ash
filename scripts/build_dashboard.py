@@ -27,16 +27,19 @@ from statsmodels.stats.multitest import multipletests
 from statsmodels.stats.proportion import proportion_confint
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
-BASELINE_YEARS = (2020, 2021)     # pooled pre-ChatGPT baseline (matches the pre-registration)
+BASELINE_YEARS = (2020, 2021)     # pooled pre-ChatGPT baseline (pilot is exploratory; the 2026 census will be pre-registered)
 FIRST_YEAR = 2020
 FULL_N = 250                      # planned per-year pilot sample
 NO_TEXT = {2022: "No abstract text in Crossref"}
-PENDING = {2026: "All abstracts, after Blood posts them (about Dec 5)"}
+PENDING = {2026: "All abstracts, after Blood posts them (about Dec 11)"}
 
 # Passages
 SHUFFLE_SEED = 20261114           # page order must not follow abstract numbers
 WIN_CODE = {"AI-Generated": "g", "AI-Assisted": "a"}
 NCT_RE = re.compile(r"NCT\s?\d{6,8}", re.I)
+# A few abstracts carry their title (or author/affiliation lines) pasted into the body;
+# the detector scored them as text, so they are masked for display rather than cleaned away.
+HEADER_LINE_RE = re.compile(r"(?im)^[ \t]*(title|authors?|affiliations?)[ \t]*:[^\n]*")
 
 # Words and phrases (1-3 word n-grams). Two two-sided Fisher exact tests per term, each
 # with Benjamini-Hochberg FDR across every term in its family; a term is listed only when
@@ -120,6 +123,7 @@ def build_passages(raw):
                 it[-1][1] = it[-1][1].rstrip()
                 for sg in it:
                     sg[1] = NCT_RE.sub("NCT[…]", sg[1])
+                    sg[1] = HEADER_LINE_RE.sub(lambda m: f"[{m.group(1).lower()} removed]", sg[1])
                     sg[2] = sorted(c for c in sg[2] if c)
         nw = n_words(text)
         out.append({"y": year, "lab": res["prediction_short"], "nw": nw, "hw": min(hw, nw), "p": items})
@@ -180,21 +184,23 @@ def build_terms(raw):
         ratio = rate_hl / ((hu[g] + 0.5) / nhu[size(g)])
         if (q_a[g] < FDR_Q and q_b[g] < FDR_Q and rose and rate_hl > rate_hu
                 and len(hl_abs[g]) >= MIN_ABSTRACTS and ratio > MIN_RATIO):
-            found[g] = {"t": g, "n": size(g), "k": len(hl_abs[g]),
+            found[g] = {"t": g, "n": size(g), "k": len(hl_abs[g]), "h": hl[g], "u": hu[g],
                         "r": round(ratio, 1),
                         "qa": float(q_a[g]), "qb": float(q_b[g]),
                         "b": round(100 * base(g) / n_base, 1),
                         "s": [round(100 * in_year[y][g] / n_year[y], 1) for y in years]}
-    # drop a 2-word phrase when a listed 3-word phrase containing it covers most of its abstracts
-    for g in [g for g, v in found.items() if v["n"] == 2]:
-        if any(v["n"] == 3 and f" {g} " in f" {v['t']} " and v["k"] >= 0.8 * found[g]["k"]
-               for v in found.values()):
+    # a longer term found in nearly the same highlighted abstracts (>= 80%) as a listed shorter
+    # term inside it adds nothing ("underscore the" next to "underscore"): list only the shorter
+    for g in sorted(found, key=lambda t: -size(t)):
+        if any(o != g and size(o) < size(g) and f" {o} " in f" {g} " and found[g]["k"] >= 0.8 * found[o]["k"]
+               for o in found):
             del found[g]
     key = lambda v: (-v["r"], v["t"])
     return {"years": years, "latest": latest, "base_label": "–".join(map(str, BASELINE_YEARS)),
             "words": sorted((v for v in found.values() if v["n"] == 1), key=key),
             "phrases": sorted((v for v in found.values() if v["n"] > 1), key=key),
             "rule": {"q": FDR_Q, "min_tested": MIN_TESTED, "abstracts": MIN_ABSTRACTS, "ratio": MIN_RATIO,
+                     "hl_share": round(100 * nhl[1] / (nhl[1] + nhu[1]), 1),
                      "era_from": ERA_FROM, "n_year_tests": len(fam_a), "n_hl_tests": len(fam_b)}}
 
 
@@ -241,6 +247,11 @@ def main():
         for r, q in zip(comp, multipletests(ps, method="fdr_bh")[1]):
             r["q"] = float(q)
     passages = build_passages(raw)
+    for a in passages:  # refuse to publish a pasted title, author or affiliation line
+        for it in a["p"]:
+            for sg in (it if isinstance(it, list) else []):
+                if HEADER_LINE_RE.search(sg[1]):
+                    raise SystemExit(f"a title/author/affiliation line survived masking: {sg[1][:60]!r}")
     terms = build_terms(raw)
     # ASH_BUILD_DATE=YYYY-MM-DD pins the "Updated" stamp so a rebuild can be compared byte for byte
     day = dt.date.fromisoformat(os.environ["ASH_BUILD_DATE"]) if os.environ.get("ASH_BUILD_DATE") else dt.date.today()
@@ -248,6 +259,7 @@ def main():
     hl_by_year = Counter(p["y"] for p in passages)
     data = {"updated": updated, "model": "Pangram 4.1", "rows": rows, "base": base, "n_tests": len(ps),
             "hl": {str(r["year"]): hl_by_year.get(r["year"], 0) for r in rows if r["status"] == "scored"},
+            "hl_lab": dict(sorted(Counter(p["lab"] for p in passages).items())),
             "terms": terms}
     pas_data = {"updated": updated, "model": "Pangram 4.1",
                 "rows": [{"year": r["year"], "n": r["n"]} for r in rows if r["status"] == "scored"],
@@ -438,7 +450,7 @@ MAIN_BODY = r"""<body>
 <section class="card" aria-labelledby="ch-h">
   <h2 id="ch-h">Share of abstracts flagged, by meeting year</h2>
   <p class="cap">Each column is one year's random sample. Whiskers are 95% confidence intervals for the total flagged. Hover or tab to a year for the counts; click or press Enter to read that year's highlighted passages.</p>
-  <div class="legend" aria-hidden="true"><span><i style="background:var(--s1)"></i>Entirely AI-written</span><span><i style="background:var(--s2)"></i>Partly AI-written or AI-edited</span><span><span class="whisk"></span>95% interval</span></div>
+  <div class="legend" aria-hidden="true"><span><i style="background:var(--s1)"></i>AI-written</span><span><i style="background:var(--s2)"></i>Partly AI-written or AI-edited</span><span><span class="whisk"></span>95% interval</span></div>
   <div id="chart" role="img" aria-describedby="ch-sum"></div>
   <p id="ch-sum" class="cap" style="margin-top:6px"></p>
   <details><summary>Show the data table</summary><div class="tablewrap"><table id="tbl"></table></div></details>
@@ -465,11 +477,11 @@ MAIN_BODY = r"""<body>
   <h2 id="m-h">What was done</h2>
   <ul>
     <li><b>Abstracts.</b> ASH annual-meeting abstracts as published in the <i>Blood</i> meeting supplements, retrieved from Crossref. Only the abstract body was analyzed: titles, author lists, disclosures, references and section labels were stripped with the same rules for every year. 2022 is missing because Crossref does not carry that year's abstract text.</li>
-    <li><b>Sampling.</b> A simple random sample from each year (fixed random seed): <span id="sampling"></span>.</li>
+    <li><b>Sampling.</b> A simple random sample from each year (fixed random seed) of abstracts with at least 75 words, leaving out late-breaking abstracts: <span id="sampling"></span>.</li>
     <li><b>Detector.</b> <span id="mdl2"></span> (Pangram Labs), a commercial AI-text detector. It labels each abstract as human-written, mixed (some passages AI-written or AI-edited) or AI-written. "Flagged" here means mixed or AI-written.</li>
-    <li><b>Highlighted passages.</b> The detector also judges each stretch of an abstract (from a sentence to several paragraphs) on its own and labels it human-written, AI-generated or AI-assisted. The highlights are the stretches given one of the last two labels. A few abstracts labeled human-written overall still contain one; they are included.</li>
-    <li><b>Words and phrases.</b> Every single word and run of two or three words with at least 10 uses in the text being compared was tested twice, with Fisher's exact test (two-sided). The first test compares how often a term occurs in the highlighted versus the unhighlighted text of the <span class="era"></span> abstracts, so both sides come from the same years and topics. The second compares how many abstracts contain the term in the latest year versus 2020&ndash;2021. Each test's p-values are adjusted across all terms tested (Benjamini&ndash;Hochberg). Repeats of a word within one abstract make the first test optimistic: a drug name repeated in a single flagged abstract can pass it easily. So a term is listed only if it passes both tests, appears in at least 6 different highlighted abstracts and is more than 5 times as common in highlighted as in unhighlighted text. Terms tied to a kind of study can still pass, and with 250 abstracts a year, rarer style words may not reach significance.</li>
-    <li><b>Baseline.</b> ASH 2020 and 2021 abstracts were submitted in August of those years, more than a year before ChatGPT launched on 30 November 2022. <span id="basetxt"></span></li>
+    <li><b>Highlighted passages.</b> The detector also judges each stretch of an abstract (from a sentence to several paragraphs) on its own and labels it human-written, AI-generated or AI-assisted. The highlights are the stretches given one of the last two labels. <span id="hl-human"></span></li>
+    <li><b>Words and phrases.</b> Every single word and run of two or three words was tested twice with Fisher's exact test (two-sided). The first test, for terms used at least 10 times, compares how often a term occurs in the highlighted versus the unhighlighted text of the <span class="era"></span> abstracts. The second, for terms found in at least 10 abstracts, compares how many abstracts contain the term in the latest year versus 2020&ndash;2021. Each test's p-values are adjusted across all terms tested (Benjamini&ndash;Hochberg). A term is listed only if it passes both tests, appears in at least 6 different highlighted abstracts and is more than 5 times as common in highlighted as in unhighlighted text; those two cut-offs were applied after the tests, to keep the list short. &ldquo;Times as common&rdquo; compares the term's rate per word in the two kinds of text, with 0.5 added to the unhighlighted count so that rare terms are not overstated. When a phrase turns up in nearly the same abstracts as a shorter term inside it, only the shorter term is listed. The list is exploratory. The detector may highlight a passage partly because it contains words like these, so the list describes highlighted passages; it does not show which words AI writes. Repeats of a word within one abstract make the first test optimistic, and most highlighted abstracts are from 2025, so changes in writing style over the years play a part too. With 250 abstracts a year, rarer style words may not reach significance.</li>
+    <li><b>Baseline.</b> ASH 2020 and 2021 abstracts were submitted in August of those years, more than a year before ChatGPT launched on 30 November 2022, though earlier tools such as GPT-3, Grammarly and DeepL already existed. <span id="basetxt"></span></li>
     <li><b>Statistics.</b> Wilson 95% intervals for each share. Each later year is compared with 2020 and 2021 combined by Fisher's exact test; p-values are adjusted for the number of comparisons (Benjamini&ndash;Hochberg).</li>
   </ul>
   <h2>How to read it</h2>
@@ -477,7 +489,7 @@ MAIN_BODY = r"""<body>
     <li>A flag is a detector's judgment, not proof. It says nothing about whether the science is sound or whether AI use broke any rule; using AI to polish English is common and usually allowed.</li>
     <li>How well the detector catches AI text in short, number-heavy clinical abstracts has not yet been measured here. Tests on abstracts deliberately written or edited by AI are planned.</li>
     <li>With 250 abstracts a year, each share is uncertain by several percentage points either way; the whiskers show how much.</li>
-    <li>Highlighted passages are shown without titles, authors, abstract numbers or links, and not in abstract-number order. Trial registration numbers are masked, and text the detector did not highlight is reduced to a word count. Full per-abstract results are not published.</li>
+    <li>Highlighted passages are shown without titles, authors, abstract numbers or links, and not in abstract-number order. Trial registration numbers and pasted title lines are masked, and text the detector did not highlight is reduced to a word count. Passages can still name an institution, a study or a data set. Full per-abstract results are not published.</li>
   </ul>
   <h2>What comes next</h2>
   <p>Every ASH 2026 abstract (about 8,000) will be scored once <i>Blood</i> posts them, under an analysis plan registered in advance. Planned comparisons include abstracts by fully academic author teams, by teams entirely from pharmaceutical or other companies, and by mixed academic and industry teams, as well as comparisons by scientific category, presentation type and region, all with false-discovery-rate control.</p>
@@ -490,12 +502,12 @@ MAIN_BODY = r"""<body>
 
 <section class="card prose" aria-labelledby="s-h">
   <h2 id="s-h">What could work better than a ban</h2>
-  <p>ASH's rules for meeting abstracts already forbid AI-written text. Its <a href="https://www.hematology.org/meetings/annual-meeting/abstracts/call-for-abstracts">2026 call for abstracts</a> makes an abstract ineligible if AI was used to generate its text, and its <a href="https://www.hematology.org/meetings/annual-meeting/abstracts/copyright-and-reuse-policy">copyright policy</a> bars authors from putting their abstract into any AI tool for any purpose, translation included, whatever the tool's privacy settings. Spelling and grammar checks with a &ldquo;closed AI system&rdquo; are allowed, a line that is hard to draw now that most writing software has AI built in. The detector labeled <span id="ai-last"></span> entirely AI-written. If it is roughly right, the rule is often not followed; if it is not, the rule cannot be fairly enforced with a detector. Either way, a ban is hard to follow and hard to check, and it pushes AI use out of sight. Some alternatives:</p>
+  <p>ASH's rules for meeting abstracts already forbid AI-generated text. Its <a href="https://www.hematology.org/meetings/annual-meeting/abstracts/call-for-abstracts">2026 call for abstracts</a> makes an abstract ineligible if AI was used to generate its text, and its <a href="https://www.hematology.org/meetings/annual-meeting/abstracts/copyright-and-reuse-policy">copyright policy</a> bars authors from putting their abstract into any AI tool for any purpose, translation included, whatever the tool's privacy settings. The call does allow spelling and grammar checks with a &ldquo;closed AI system&rdquo;, and using AI to revise existing text with the authors' oversight. Those lines are hard to draw now that most writing software has AI built in. The detector labeled <span id="ai-last"></span> AI-written. Some of that may be heavy AI revision, which ASH allows, rather than AI-generated text, which it does not, and a detector cannot tell the two apart. So the rule cannot be enforced fairly with a detector, authors cannot easily tell where the line is, and a ban pushes AI use out of sight. Some alternatives:</p>
   <ul>
     <li><b>Disclose, don't ban.</b> Add an AI section to the disclosure form authors already fill in for conflicts of interest: which tool and version, what it did (language editing, translation, drafting text, literature search, code, statistical analysis, figures or data handling) and what the authors checked. Publish it with the abstract, as conflicts of interest are. Disclosed use should not count against an abstract; undisclosed AI writing should. The <a href="https://www.icmje.org/recommendations/browse/artificial-intelligence/ai-use-by-authors.html">ICMJE recommends</a> the same for medical journals: disclosure at submission, and a description of the use in the work itself.</li>
-    <li><b>Marking at the source.</b> The European Union already requires it. Under Article 50(2) of the <a href="https://eur-lex.europa.eu/eli/reg/2024/1689/oj">EU AI Act</a>, which has applied since 2 August 2026, providers of generative AI, large language models included, must mark what their systems produce in a machine-readable way, such as a watermark, so that it can be detected as AI-generated, as far as is technically feasible. Systems already on the market have until 2 December 2026. The Commission's <a href="https://digital-strategy.ec.europa.eu/en/news/commission-publishes-code-practice-marking-and-labelling-ai-generated-content">Code of Practice</a> (June 2026) sets out how. China has required visible labels and embedded marks on AI-generated content since September 2025. Marks have limits: rewording or translation can weaken a text watermark, a model run on a researcher's own computer may add none, and the EU rule exempts AI that only assists with standard editing, the same line ASH draws between polishing and writing. Marks can help check a disclosure; they cannot replace one.</li>
+    <li><b>Marking at the source.</b> The European Union already requires it. Article 50(2) of the <a href="https://eur-lex.europa.eu/eli/reg/2024/1689/oj">EU AI Act</a> has applied since 2 August 2026: providers of generative AI, large language models included, must mark what their systems produce in a machine-readable way, such as a watermark, so that it can be detected as AI-generated, as far as is technically feasible. Systems already on the market have until 2 December 2026. The Commission's <a href="https://digital-strategy.ec.europa.eu/en/news/commission-publishes-code-practice-marking-and-labelling-ai-generated-content">Code of Practice</a> (June 2026) sets out how. China has required visible labels and embedded marks on AI-generated content since September 2025. Marks have limits: rewording or translation can weaken a text watermark, a model run on a researcher's own computer may add none, and the EU rule exempts AI that only assists with standard editing, the same line ASH draws between polishing and writing. Marks can help check a disclosure; they cannot replace one.</li>
     <li><b>Reproducible computation.</b> When AI helps handle or analyze data, someone else should be able to re-run the analysis: the code, a pinned software environment, random seeds, the exact model name and version, the prompts and the saved model outputs. Saved outputs matter because hosted models change and are retired, so a re-run months later may not give the same answer. Code written by an AI model is still code, and it should be shared and run like any other.</li>
-    <li><b>Free to run, not a subscription.</b> Some journals now ask for runnable &ldquo;compute capsules&rdquo;. Several Nature Portfolio journals <a href="https://blogs.nature.com/blog/nature-research-journals-trial-new-tools-to-enhance-code-peer-review-and-publication/">review code through Code Ocean</a>, a company whose capsules run on its own servers, with use beyond a free tier sold by individual and institutional subscription. The idea is right, but whether a paper can be checked should not depend on one company's prices or on a reader's institution paying for access. Free options already exist. <a href="https://zenodo.org/">Zenodo</a> (run by CERN) and <a href="https://www.softwareheritage.org/">Software Heritage</a> store code permanently, a Docker file records the exact software versions used, and <a href="https://mybinder.org/">mybinder.org</a> lets anyone rerun an analysis in a web browser at no charge. Societies, journals and funders should cover the cost of keeping these free.</li>
+    <li><b>Free to run, not a subscription.</b> Some journals now offer runnable &ldquo;compute capsules&rdquo;. Several Nature Portfolio journals have <a href="https://blogs.nature.com/blog/nature-research-journals-trial-new-tools-to-enhance-code-peer-review-and-publication/">reviewed code through Code Ocean</a> since 2018, a commercial platform that sells institutional subscriptions and runs capsules on its own servers. The idea is right, but whether a paper can be checked should not depend on one company's servers and prices, or on a reader's institution paying for access. Free options already exist. <a href="https://zenodo.org/">Zenodo</a> (run by CERN) and <a href="https://www.softwareheritage.org/">Software Heritage</a> store code permanently, a Docker file records the exact software versions used, and <a href="https://mybinder.org/">mybinder.org</a> lets anyone rerun an analysis in a web browser at no charge. Societies, journals and funders should cover the cost of keeping these free.</li>
     <li><b>Detectors for monitoring, not for judging individuals.</b> Detectors can misjudge some writers: in <a href="https://doi.org/10.1016/j.patter.2023.100779">one study</a>, popular detectors labeled more than half of essays by non-native English writers as AI-written. Pangram flagged none of the 500 pre-ChatGPT abstracts here, but that does not show it treats every group of writers alike. Detectors suit what this page does, tracking a field in aggregate, not rejecting a single abstract. AI language editing is also a real help to the many ASH authors who write in a second language, and a ban falls hardest on them.</li>
     <li><b>Doing the same here.</b> We plan to release this audit as a free, re-runnable package: the code, a pinned environment and a check that freshly downloaded abstract text matches published fingerprints. The abstracts stay with ASH: they are downloaded again from Crossref rather than redistributed. The detector step is the one part that can only be repeated with a paid Pangram key.</li>
   </ul>
@@ -519,23 +531,24 @@ $('sampling').textContent = scored.every(r => r.n === scored[0].n)
   ? `${scored[0].n} abstracts from each of ${scored.slice(0, -1).map(r => r.year).join(', ')} and ${last.year}`
   : scored.map(r => `${r.n} from ${r.year}${r.partial ? ' (partial)' : ''}`).join(', ');
 $('ai-last').textContent = `${pct(last.ai, last.n, 0)} of the ${last.n} sampled ${last.year} abstracts`;
-$('basetxt').textContent =`The detector flagged ${base.flag} of their ${base.n} abstracts, so its false-alarm rate on this kind of writing is probably under ${(100 * base.hi).toFixed(1)}% (the upper end of the 95% interval).`;
+$('basetxt').textContent = `The detector flagged ${base.flag} of these ${base.n} abstracts (95% upper bound ${(100 * base.hi).toFixed(1)}%). That bounds its false alarms on writing from ${base.label} only; it does not measure its error rate on current abstracts.`;
+$('hl-human').textContent = `Of the ${scored.reduce((s, r) => s + DATA.hl[r.year], 0)} abstracts with any highlight, ${DATA.hl_lab.Human || 0} were labeled human-written overall; they are included.`;
 
 // hero
 (function(){
   const h = $('hero');
   const big = document.createElement('div'); big.className = 'big'; big.textContent = pct(last.flag, last.n, 0);
   const lede = document.createElement('div'); lede.className = 'lede';
-  lede.textContent = `of a random sample of ${last.n} ASH ${last.year} abstracts were flagged as partly or entirely AI-written (${pct(last.ai, last.n, 0)} entirely).`;
+  lede.textContent = `of a random sample of ${last.n} ASH ${last.year} abstracts were flagged by the detector as AI-written in whole or in part (${pct(last.ai, last.n, 0)} labeled AI-written overall).`;
   const vs = document.createElement('div'); vs.className = 'vs';
-  vs.textContent = `For comparison: ${pct(base.flag, base.n, 0)} of ${base.n} ASH ${base.label} abstracts, written before ChatGPT existed.`;
+  vs.textContent = `For comparison: ${pct(base.flag, base.n, 0)} of ${base.n} ASH ${base.label} abstracts, written before ChatGPT was released.`;
   h.append(big, lede, vs);
 })();
 
 // table
 (function(){
   const t = $('tbl'); const hd = t.createTHead().insertRow();
-  ['Year', 'Abstracts scored', 'Entirely AI', 'Partly AI', 'Flagged (95% interval)', `p vs ${base.label} (adjusted)`].forEach(x => { const th = document.createElement('th'); th.textContent = x; hd.appendChild(th); });
+  ['Year', 'Abstracts scored', 'AI-written', 'Partly AI', 'Flagged (95% interval)', `p vs ${base.label} (adjusted)`].forEach(x => { const th = document.createElement('th'); th.textContent = x; hd.appendChild(th); });
   const b = t.createTBody();
   rows.forEach(r => { const tr = b.insertRow(); const c = v => { tr.insertCell().textContent = v; };
     c(r.year);
@@ -588,13 +601,13 @@ function draw(){
     lab.textContent = pct(r.flag, r.n, r.flag ? 1 : 0);
     // hit target: whole column band
     const hit = el('rect', {x: cx - band / 2, y: m.t, width: band, height: ph, class: 'hit go', tabindex: 0, role: 'button',
-      'aria-label': `${r.year}: ${pct(r.flag, r.n)} flagged (${r.ai} entirely AI, ${r.mixed} partly AI) of ${r.n}. Read this year's highlighted passages.`}, svg);
+      'aria-label': `${r.year}: ${pct(r.flag, r.n)} flagged (${r.ai} AI-written, ${r.mixed} partly AI) of ${r.n}. Read this year's highlighted passages.`}, svg);
     hit.addEventListener('click', () => goYear(r.year));
     hit.addEventListener('keydown', ev => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); goYear(r.year); } });
     const show = ev => {
       tip.replaceChildren();
       const h = document.createElement('div'); h.className = 'h'; h.textContent = `ASH ${r.year}` + (r.partial ? ' (partial sample)' : ''); tip.appendChild(h);
-      [['Entirely AI', r.ai, '--s1'], ['Partly AI', r.mixed, '--s2']].forEach(([name, k, col]) => {
+      [['AI-written', r.ai, '--s1'], ['Partly AI', r.mixed, '--s2']].forEach(([name, k, col]) => {
         const row = document.createElement('div'); row.className = 'row';
         const left = document.createElement('span'); const key = document.createElement('i'); key.className = 'key'; key.style.background = C(col);
         left.append(key, document.createTextNode(name));
@@ -634,7 +647,7 @@ document.querySelectorAll('.era').forEach(e => { e.textContent = `${TERMS.rule.e
   const R = TERMS.rule, yrs = TERMS.years, SHOW = 12;
   let kind = 'words', all = false;
   const nf = x => x.toLocaleString('en-US');
-  $('w-rule').textContent = `Listed when a term passes two tests after correction for the number of terms tested (Benjamini–Hochberg, q < ${R.q}): it is more common in the highlighted passages than in the unhighlighted text of the same ${R.era_from}–${TERMS.latest} abstracts (${nf(R.n_hl_tests)} terms tested), and more ${TERMS.latest} abstracts use it than ${TERMS.base_label} abstracts (${nf(R.n_year_tests)} terms tested). It must also turn up in at least ${R.abstracts} different highlighted abstracts and be more than ${R.ratio} times as common in the highlighted passages as in the unhighlighted text. Each line is the share of sampled abstracts using the term, by year, on its own scale; the dashed stretch spans 2022, which has no data. Select a term to read the passages that contain it.`;
+  $('w-rule').textContent = `Listed when a term passes two tests after correction for the number of terms tested (Benjamini–Hochberg, q < ${R.q}): it is more common in the highlighted passages than in the unhighlighted text of the same ${R.era_from}–${TERMS.latest} abstracts (${nf(R.n_hl_tests)} terms tested), and more ${TERMS.latest} abstracts use it than ${TERMS.base_label} abstracts (${nf(R.n_year_tests)} terms tested). It must also turn up in at least ${R.abstracts} different highlighted abstracts and be more than ${R.ratio} times as common in the highlighted passages as in the unhighlighted text. Under each ratio: the first test's q-value, and how many times the term was used in highlighted and in other text (highlighted text is ${R.hl_share}% of the words in those abstracts). Each line is the share of sampled abstracts using the term, by year, on its own scale; the dashed stretch spans 2022, which has no data. The list is exploratory (see "Words and phrases" under What was done). Select a term to read the passages that contain it.`;
   const fq = q => { if (q < 0.001) return 'q < 0.001';
     let s = q.toPrecision(2); if (+s >= R.q && q < R.q) s = q.toPrecision(3); return 'q = ' + s; };
   function spark(v){
@@ -663,7 +676,7 @@ document.querySelectorAll('.era').forEach(e => { e.textContent = `${TERMS.rule.e
       btn.setAttribute('aria-label', `${v.t}: read the passages that contain it`);
       tr.insertCell().appendChild(btn);
       const c2 = tr.insertCell(); const r = document.createElement('b'); r.textContent = `${v.r.toFixed(1)}×`;
-      const k = document.createElement('span'); k.className = 'sub2'; k.textContent = fq(v.qb);
+      const k = document.createElement('span'); k.className = 'sub2'; k.textContent = `${fq(v.qb)} · ${v.h} vs ${v.u} uses`;
       const ka = document.createElement('span'); ka.className = 'nabs'; ka.textContent = ` · ${v.k} abstracts`; k.appendChild(ka); c2.append(r, k);
       const c3 = tr.insertCell(); const d = document.createElement('div'); d.className = 'spark';
       const nums = document.createElement('span'); nums.textContent = `${v.b.toFixed(1)}% → ${v.s[v.s.length - 1].toFixed(1)}%`;
@@ -705,7 +718,7 @@ PAS_BODY = r"""<body>
     <select id="f-y" aria-label="Meeting year"></select>
     <select id="f-l" aria-label="Detector's label for the whole abstract">
       <option value="">All abstract labels</option>
-      <option value="AI">Entirely AI-written</option>
+      <option value="AI">AI-written</option>
       <option value="Mixed">Partly AI-written</option>
       <option value="Human">Human-written overall</option>
     </select>
@@ -727,7 +740,7 @@ PAS_BODY = r"""<body>
   <ul>
     <li>A highlight is the detector's judgment, not proof that AI wrote the text, and it says nothing about whether the science is sound. Using AI to polish English is common and usually allowed.</li>
     <li>The detector judges each stretch of an abstract on its own. Solid highlights are passages it labeled AI-generated; lighter, dotted ones are AI-assisted. The label next to each abstract is its verdict on the abstract as a whole.</li>
-    <li>Passages are shown without titles, authors, abstract numbers or links, and not in abstract-number order. Trial registration numbers are masked.</li>
+    <li>Passages are shown without titles, authors, abstract numbers or links, and not in abstract-number order. Trial registration numbers and pasted title lines are masked. Passages can still name an institution, a study or a data set.</li>
     <li>Methods, statistics and the words these passages lean on are on the <a href="../">main page</a>.</li>
   </ul>
 </section>
@@ -745,7 +758,9 @@ const scored = DATA.rows, PAS = DATA.passages;
 const esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 function makeRe(q, exact, flags){
   q = q.trim(); if (!q) return null;
-  return new RegExp('\\b' + q.split(/\s+/).map(esc).join('\\s+') + (exact ? '\\b' : ''), flags);
+  // word boundaries only next to word characters, so searches like "≥3" still match
+  const pre = /^\w/.test(q) ? '\\b' : '', post = exact && /\w$/.test(q) ? '\\b' : '';
+  return new RegExp(pre + q.split(/\s+/).map(esc).join('\\s+') + post, flags);
 }
 function addText(parent, s, re){
   if (!re) { parent.appendChild(document.createTextNode(s)); return; }
@@ -762,7 +777,7 @@ const smooth = () => matchMedia('(prefers-reduced-motion: reduce)').matches ? 'a
 const toExplorer = () => $('ex').scrollIntoView({behavior: smooth(), block: 'start'});
 
 const EX = {page: 0, rows: [], exact: false, re: null, PER: 10};
-const LAB = {AI: ['entirely AI-written', '--s1'], Mixed: ['partly AI-written', '--s2'], Human: ['human-written overall', '--axis']};
+const LAB = {AI: ['AI-written', '--s1'], Mixed: ['partly AI-written', '--s2'], Human: ['human-written overall', '--axis']};
 PAS.forEach((a, i) => { a.i = i; a.cov = a.nw ? a.hw / a.nw : 0;
   a.txt = a.p.filter(Array.isArray).map(b => b.map(s => s[1]).join('')).join('\n'); });
 const scoredN = Object.fromEntries(scored.map(r => [r.year, r.n]));

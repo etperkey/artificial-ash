@@ -13,10 +13,10 @@ Python, in a browser on [mybinder.org](https://mybinder.org/), or on GitHub's fr
 
 | Step | What it does | Needs | Expected result |
 |---|---|---|---|
-| `data` | Downloads every ASH abstract for each year from Crossref, cleans it, draws the random samples (seed 20261113) | Internet, about 30 minutes, ~270 MB | 5 sample files in `data/samples/` |
+| `data` | Downloads every ASH abstract for each year from Crossref, cleans it, draws the random samples (seed 20261113) | Internet, a few minutes, ~400 MB of disk | 5 sample files in `data/samples/` |
 | `verify` | Checks your abstracts against the study's SHA-256 fingerprints, abstract by abstract | `data` | `VERIFIED: same abstracts as the study` |
 | `rehydrate` | Rebuilds the Pangram results from the replay files (text stripped, see below) | `data`, the replay files | `REHYDRATED: 1250 responses, every text hash matched` |
-| `score` | Scores the samples again with Pangram yourself | `data`, a paid Pangram API key (~715,000 words, about $360 at list price) | new Pangram results |
+| `score` | Scores the samples again with Pangram yourself (`--max-usd` caps the total; it refuses to run over rehydrated results) | `data`, a paid Pangram API key (~715,000 words, about $360 at list price) | new Pangram results |
 | `analyze` | Statistics, the two public pages (results, and the passage explorer), and a comparison with the published numbers | results from `rehydrate` or `score` | `RESULTS MATCH the published counts`; with `ASH_BUILD_DATE=2026-11-14`, both pages are byte-identical to the published build |
 | `selftest` | Offline check of the environment: recomputes the published q-values and tests the replay round trip | nothing | `SELFTEST PASSED`, `TEST PASSED` |
 
@@ -24,18 +24,25 @@ Python, in a browser on [mybinder.org](https://mybinder.org/), or on GitHub's fr
 
 ## Run it
 
-**Docker** (the exact environment of the study):
+**Docker** (the exact environment of the study). Create the output folders first and run the
+container as yourself; otherwise, on Linux, Docker creates them owned by root and the steps
+cannot write to them:
 
 ```sh
 docker build -t artificial-ash .
-docker run --rm artificial-ash selftest
-docker run --rm -v "$PWD/data:/capsule/data" artificial-ash data
-docker run --rm -v "$PWD/data:/capsule/data" artificial-ash verify
+mkdir -p data results public_dashboard
+run() { docker run --rm --user "$(id -u):$(id -g)" -e ASH_BUILD_DATE=2026-11-14 \
+  -v "$PWD/data:/capsule/data" -v "$PWD/results:/capsule/results" \
+  -v "$PWD/public_dashboard:/capsule/public_dashboard" "$@"; }
+run artificial-ash selftest
+run artificial-ash data
+run artificial-ash verify
 # with the replay files in ./replay:
-docker run --rm -e ASH_BUILD_DATE=2026-11-14 -v "$PWD/data:/capsule/data" \
-  -v "$PWD/replay:/capsule/replay:ro" -v "$PWD/results:/capsule/results" \
-  -v "$PWD/public_dashboard:/capsule/public_dashboard" artificial-ash all
+run -v "$PWD/replay:/capsule/replay:ro" artificial-ash rehydrate
+run artificial-ash analyze
 ```
+
+On Windows with Docker Desktop (PowerShell), leave out `--user ...` and write `${PWD}` for `$PWD`.
 
 **Binder** (free, in your browser): [launch it on mybinder.org](https://mybinder.org/v2/gh/etperkey/artificial-ash/HEAD),
 open a terminal (File > New > Terminal), and run `python -I reproduce.py selftest`, then `data` and `verify`.
@@ -55,7 +62,9 @@ python -I reproduce.py verify
 * **The abstracts.** ASH owns the copyright in its meeting abstracts, so they are not redistributed.
   `data` downloads them from Crossref, where ASH publishes them, and `verify` proves they are the
   same text the study analyzed (`manifests/sample_<year>.tsv` lists each sampled DOI with the
-  SHA-256 of its cleaned text). If Crossref ever corrects an abstract, `verify` names it.
+  SHA-256 of its cleaned text). If Crossref corrects a sampled abstract, `verify` names it. If
+  Crossref adds or removes an abstract, the random draw shifts and `verify` reports the whole
+  year's sample as different.
 * **Pangram's responses as returned.** Each response repeats the abstract it scored. The replay
   files keep everything else (labels, scores and the start and end of every judged passage) plus
   hashes, and `rehydrate` puts your own downloaded text back, refusing if a single character differs.

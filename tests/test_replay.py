@@ -38,7 +38,8 @@ def main():
         subprocess.run([*py, "strip", "--results", f"{d}/results", "--out", f"{d}/replay", "--root", d], check=True)
         stripped = open(os.path.join(d, "replay/t.replay.jsonl"), encoding="utf-8").read()
         assert "paragraph" not in stripped, "text survived stripping"
-        subprocess.run([*py, "rehydrate", "--replay", f"{d}/replay", "--results", f"{d}/out", "--root", d], check=True)
+        subprocess.run([*py, "rehydrate", "--replay", f"{d}/replay", "--results", f"{d}/out", "--root", d,
+                        "--expect", "none"], check=True)
         back = open(os.path.join(d, "out/t.raw.jsonl"), encoding="utf-8").read()
         assert back == raw_line, "rehydrated response differs from the original"
         print("TEST PASSED: replay round trip is exact and text-free")

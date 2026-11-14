@@ -12,13 +12,15 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+      - name: Binder must use the same locked packages
+        run: cmp requirements.txt binder/requirements.txt
       - name: Build the capsule image
         run: docker build -t capsule .
       - name: Offline self-test (statistics + replay round trip)
         run: docker run --rm capsule selftest
 
   crossref:
-    # Slow (downloads ~280 MB from Crossref), so only monthly or on demand.
+    # Downloads every abstract from Crossref (~400 MB on disk), so only monthly or on demand.
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     timeout-minutes: 120

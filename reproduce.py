@@ -24,11 +24,22 @@ S = os.path.join(ROOT, "scripts")
 YEARS = (2020, 2021, 2023, 2024, 2025)   # 2022: Crossref has no abstract text
 SAMPLE_N, SEED = 500, 20261113           # random order; the first SCORED_N rows were scored
 SCORED_N = 250
+USD_PER_100_WORDS = 0.05                 # Pangram list price (2026-11), as in score_pangram.py
+
+
+def shown(c):
+    c = str(c)
+    if not os.path.isabs(c):
+        return c
+    try:
+        return os.path.relpath(c, ROOT)
+    except ValueError:  # Windows: a path on another drive
+        return c
 
 
 def run(*args, env=None):
     cmd = [sys.executable, "-I", *map(str, args)]
-    print("$", " ".join(os.path.relpath(c, ROOT) if os.path.isabs(str(c)) else str(c) for c in cmd[2:]), flush=True)
+    print("$", " ".join(shown(c) for c in cmd[2:]), flush=True)
     r = subprocess.run(cmd, cwd=ROOT, env=env)
     if r.returncode:
         sys.exit(r.returncode)
@@ -52,10 +63,24 @@ def step_data(years):
 
 
 def step_score(years, max_usd):
+    if os.path.exists(os.path.join(ROOT, "results", "REHYDRATED")):
+        sys.exit("results/ holds the study's rehydrated Pangram results; scoring would skip every abstract\n"
+                 "as already done. Move or delete results/ first to score the samples yourself.")
     if not os.environ.get("PANGRAM_API_KEY") and not os.path.exists(os.path.join(ROOT, ".pangram_key")):
         sys.exit("score needs a Pangram API key: set PANGRAM_API_KEY (scoring costs money; see README)")
+    # --max-usd caps the TOTAL across years; each year gets exactly its own estimate
+    cost = {}
     for y in years:
-        run(os.path.join(S, "score_pangram.py"), sample_path(y), "--limit", SCORED_N, "--max-usd", max_usd)
+        rows = [json.loads(l) for l in open(sample_path(y), encoding="utf-8")][:SCORED_N]
+        cost[y] = sum(r["n_words"] for r in rows) / 100 * USD_PER_100_WORDS
+    total = sum(cost.values())
+    print(f"scoring {len(years)} years x {SCORED_N} abstracts: about ${total:,.2f} at list price "
+          f"(already-scored abstracts are skipped)")
+    if total > max_usd:
+        sys.exit(f"Refusing: up to ${total:,.2f} exceeds --max-usd {max_usd}. Raise the cap deliberately.")
+    for y in years:
+        run(os.path.join(S, "score_pangram.py"), sample_path(y), "--limit", SCORED_N,
+            "--max-usd", f"{cost[y] + 0.01:.2f}")
 
 
 def step_analyze():
