@@ -1,0 +1,8 @@
+{
+  "year": 2020,
+  "records": 4242,
+  "eligible": 4187,
+  "eligible_words": 2397564,
+  "eligible_sha256": "77b70b39a1fab482ad7d52d570cf76fb09cda830ada774dd3d28b11bf332f5bb",
+  "sample_file": "sample_2020_n500_seed20261113.jsonl"
+}

@@ -1,0 +1,12 @@
+# Never commit: ASH abstract text, Pangram outputs, keys
+data/
+results/
+public_dashboard/
+replay/
+.pangram_key
+*.raw.jsonl
+*.scores.jsonl
+*.tmp
+__pycache__/
+.venv/
+venv/

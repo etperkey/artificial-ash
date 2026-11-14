@@ -1,0 +1,8 @@
+{
+  "year": 2025,
+  "records": 8261,
+  "eligible": 8254,
+  "eligible_words": 4652716,
+  "eligible_sha256": "160d5f5329a3585fb4f838f88010eac4fc6664bb4f958676428bf4cf617b59b0",
+  "sample_file": "sample_2025_n500_seed20261113.jsonl"
+}

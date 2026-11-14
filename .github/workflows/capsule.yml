@@ -1,0 +1,33 @@
+name: capsule
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 6 1 * *"   # monthly: re-download the abstracts from Crossref and verify them
+
+jobs:
+  selftest:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the capsule image
+        run: docker build -t capsule .
+      - name: Offline self-test (statistics + replay round trip)
+        run: docker run --rm capsule selftest
+
+  crossref:
+    # Slow (downloads ~280 MB from Crossref), so only monthly or on demand.
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t capsule .
+      - run: mkdir -p data && chmod 777 data
+      - name: Download, clean and sample the abstracts
+        run: docker run --rm -v "$PWD/data:/capsule/data" capsule data
+      - name: Check them against the study's fingerprints
+        run: docker run --rm -v "$PWD/data:/capsule/data" capsule verify
+      # The abstract text is ASH's copyright: it is never uploaded as a workflow artifact.

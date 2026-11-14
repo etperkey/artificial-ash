@@ -1,0 +1,22 @@
+cff-version: 1.2.0
+message: "If you use this code, please cite it as below."
+title: "Artificial ASH: reproducible audit of AI-written text in American Society of Hematology abstracts"
+version: 0.1.0
+license: MIT
+repository-code: "https://github.com/etperkey/artificial-ash"
+url: "https://eperkey.org/artificial_ash/"
+authors:
+  - family-names: Perkey
+    given-names: Eric
+  - family-names: Wen
+    given-names: Frank
+  - family-names: Shaw
+    given-names: Reid
+  - family-names: Wen
+    given-names: Max
+keywords:
+  - AI-generated text
+  - large language models
+  - scientific abstracts
+  - hematology
+  - reproducibility

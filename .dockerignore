@@ -1,0 +1,9 @@
+.git
+data
+results
+public_dashboard
+replay
+.pangram_key
+__pycache__
+.venv
+venv
