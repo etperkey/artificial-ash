@@ -96,6 +96,16 @@ Python 3.12.10 in a Docker base image pinned by digest; NumPy 2.3.5, SciPy 1.17.
 0.14.6 and their dependencies pinned by version and hash. GitHub Actions rebuilds the image and runs
 the self-test on every change, and re-downloads and verifies the abstracts once a month.
 
+## Changes
+
+* **2026-11-14, cleaning fix.** The 2025 export often runs section labels into the first sentence
+  ("Background Acute…"); the first cleaning rules missed these in about 19% of 2025 abstracts
+  against 1–2% in other years. `clean.py` now removes them, plus pasted title lines and short label
+  lines. The samples are unchanged (same abstracts, same order); the 87 sampled abstracts whose text
+  changed were scored again. 86 kept their label; one 2025 abstract moved from AI to Mixed, so 2025
+  is 29 AI and 47 Mixed (76 flagged either way). The fingerprints, replay files and expected outputs
+  here are for the corrected text; the original results are archived by the authors.
+
 ## Citation and license
 
 See `CITATION.cff`. Code: MIT license. Abstracts: copyright the American Society of Hematology.

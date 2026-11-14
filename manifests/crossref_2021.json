@@ -2,7 +2,7 @@
   "year": 2021,
   "records": 4945,
   "eligible": 4939,
-  "eligible_words": 2866981,
-  "eligible_sha256": "b3c5f93e16da06ea5c2965dfbc1662008e76d0ee41352c2b9d1551fb1281272a",
+  "eligible_words": 2866359,
+  "eligible_sha256": "ade3956a9922d6a05754caf4b10774150c8cf7a2958c83a5d5bacca0c1d52306",
   "sample_file": "sample_2021_n500_seed20261113.jsonl"
 }

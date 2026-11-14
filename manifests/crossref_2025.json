@@ -2,7 +2,7 @@
   "year": 2025,
   "records": 8261,
   "eligible": 8254,
-  "eligible_words": 4652716,
-  "eligible_sha256": "160d5f5329a3585fb4f838f88010eac4fc6664bb4f958676428bf4cf617b59b0",
+  "eligible_words": 4646376,
+  "eligible_sha256": "35517f8bba3449b7970a099da257676c7bf4f550b2109b0a1dc73a3a91624de0",
   "sample_file": "sample_2025_n500_seed20261113.jsonl"
 }

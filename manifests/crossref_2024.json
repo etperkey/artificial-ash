@@ -2,7 +2,7 @@
   "year": 2024,
   "records": 7969,
   "eligible": 7963,
-  "eligible_words": 4534101,
-  "eligible_sha256": "cd5d88b1beebb8cced05f9340452634662f6cd3a21ac5ff9baa9106039f4c5eb",
+  "eligible_words": 4533179,
+  "eligible_sha256": "a1023791a0d6ec0921d205680eca20432ddd0f86ce5b4093f27494432051d75c",
   "sample_file": "sample_2024_n500_seed20261113.jsonl"
 }

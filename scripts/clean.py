@@ -24,7 +24,36 @@ HEADER_WORDS = (r"background(?: and (?:significance|aims?|rationale))?|introduct
                 r"interpretation|implications|impact|clinical trial information|trial registration")
 PURE_HEADER = re.compile(rf"^\s*(?:{HEADER_WORDS})\s*[:.\-–—]?\s*$", re.I)
 LEAD_HEADER = re.compile(rf"^\s*(?:{HEADER_WORDS})\s*[:–—]\s*", re.I)
-DROP_PARA = re.compile(r"^\s*(references?|keywords?|disclosures?|funding|acknowledge?ments?)\s*[:.]", re.I)
+DROP_PARA = re.compile(r"^\s*(references?|keywords?|disclosures?|funding|acknowledge?ments?|title|authors?|"
+                       r"affiliations?)\s*[:.]", re.I)
+# Headings that the rules above miss (fixed 2026-11-14: 18.8% of 2025 abstracts had one, vs 1-2% in
+# other years, because the 2025 export often runs the heading into the first sentence):
+HWORD = re.compile(rf"\b(?:{HEADER_WORDS})\b", re.I)
+# stray punctuation in front of a heading: ".Methods: Eligible ...", "- Methods: ..."
+PUNCT_HEADER = re.compile(rf"^[\s.,;:·•\-–—]+(?=(?:{HEADER_WORDS})\b)", re.I)
+# an all-capitals label run into the text: "AIMS AND OBJECTIVES To predict ...", "PURPOSE OF THE STUDY: to ..."
+CAPS_LABEL = re.compile(r"^\s*([A-Z][A-Z/&\-]+(?:\s+[A-Z][A-Z/&\-]*)*)\s*(?:[:.]\s+|\s+(?=[A-Z][a-z]))")
+# a heading run straight into the first sentence: "Background Acute pain ...", "Results Of 67 pts ..."
+RUNIN_HEADER = re.compile(rf"^\s*(?i:{HEADER_WORDS})\s+(?=[A-Z])")
+# a heading that lost its paragraph break: "... CAR-T therapy. Methods: Using ..."
+MID_HEADER = re.compile(rf"(?<=[.!?)\]])\s+(?i:{HEADER_WORDS})\s*:\s+(?=\S)")
+
+
+SMALL_WORDS = {"and", "of", "the", "for", "in", "with", "to", "on", "&", "/"}
+
+
+def label_line(p):
+    """A short line that is only a label: "AIM OF THE STUDY AND METHODS", "Impact Statement:",
+    "Material and methods:". Not a short sentence such as "Three themes were identified:"."""
+    words = p.split()
+    if len(words) > 6:
+        return False
+    if re.search(r"[A-Z]", p) and not re.search(r"[a-z0-9]", p):
+        return True
+    if not p.rstrip().endswith(":"):
+        return False
+    return all(w[:1].isupper() or w.strip(":").lower() in SMALL_WORDS or HWORD.fullmatch(w.strip(":"))
+               for w in words)
 # figure/table stubs ("Figure 1 Figure 1.") and captions: present in 2021 exports, ~absent in 2025 -> drop for parity
 FIG_STUB = re.compile(r"^\s*(figure|fig\.|table)\s*\d+", re.I)
 US_STATES = set("""AL AK AZ AR CA CO CT DE DC FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN MS MO MT NE NV NH
@@ -57,11 +86,18 @@ def body_text(jats):
     out = []
     for p in paras:
         p = WS.sub(" ", unescape(TAG.sub(" ", p))).strip()
-        if not p or PURE_HEADER.match(p) or DROP_PARA.match(p) or FIG_STUB.match(p):
+        p = PUNCT_HEADER.sub("", p, count=1)
+        if not p or PURE_HEADER.match(p) or DROP_PARA.match(p) or FIG_STUB.match(p) or label_line(p):
             continue
         p = LEAD_HEADER.sub("", p, count=1).strip()
-        if p:
-            out.append(p)
+        m = CAPS_LABEL.match(p)
+        if m and HWORD.search(m.group(1)):
+            p = p[m.end():]
+        p = RUNIN_HEADER.sub("", p, count=1)
+        for q in MID_HEADER.split(p):  # a heading inside a paragraph starts a new one
+            q = q.strip()
+            if q:
+                out.append(q)
     return "\n\n".join(out)
 
 
