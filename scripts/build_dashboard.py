@@ -52,6 +52,7 @@ ERA_FROM = 2023                   # highlighted vs unhighlighted text from these
 FDR_Q = 0.05
 MIN_TESTED = 10                   # family membership: >= 10 abstracts (year) / occurrences (highlighted)
 MIN_ABSTRACTS = 6                 # display floor: in >= 6 different highlighted abstracts
+MIN_RATIO = 5.0                   # display floor: > 5 times as common in highlighted text (Eric, 2026-11-14)
 TOKEN_RE = re.compile(r"[a-z0-9]+(?:['\-][a-z0-9]+)*")
 WORD_RE = re.compile(r"[a-z]{2,}(?:['\-][a-z]+)*")
 
@@ -176,10 +177,11 @@ def build_terms(raw):
     for g in set(q_a) & set(q_b):
         rate_hl, rate_hu = hl[g] / nhl[size(g)], hu[g] / nhu[size(g)]
         rose = in_year[latest][g] / n_year[latest] > base(g) / n_base
+        ratio = rate_hl / ((hu[g] + 0.5) / nhu[size(g)])
         if (q_a[g] < FDR_Q and q_b[g] < FDR_Q and rose and rate_hl > rate_hu
-                and len(hl_abs[g]) >= MIN_ABSTRACTS):
+                and len(hl_abs[g]) >= MIN_ABSTRACTS and ratio > MIN_RATIO):
             found[g] = {"t": g, "n": size(g), "k": len(hl_abs[g]),
-                        "r": round(rate_hl / ((hu[g] + 0.5) / nhu[size(g)]), 1),
+                        "r": round(ratio, 1),
                         "qa": float(q_a[g]), "qb": float(q_b[g]),
                         "b": round(100 * base(g) / n_base, 1),
                         "s": [round(100 * in_year[y][g] / n_year[y], 1) for y in years]}
@@ -192,7 +194,7 @@ def build_terms(raw):
     return {"years": years, "latest": latest, "base_label": "–".join(map(str, BASELINE_YEARS)),
             "words": sorted((v for v in found.values() if v["n"] == 1), key=key),
             "phrases": sorted((v for v in found.values() if v["n"] > 1), key=key),
-            "rule": {"q": FDR_Q, "min_tested": MIN_TESTED, "abstracts": MIN_ABSTRACTS,
+            "rule": {"q": FDR_Q, "min_tested": MIN_TESTED, "abstracts": MIN_ABSTRACTS, "ratio": MIN_RATIO,
                      "era_from": ERA_FROM, "n_year_tests": len(fam_a), "n_hl_tests": len(fam_b)}}
 
 
@@ -242,9 +244,14 @@ def main():
     terms = build_terms(raw)
     # ASH_BUILD_DATE=YYYY-MM-DD pins the "Updated" stamp so a rebuild can be compared byte for byte
     day = dt.date.fromisoformat(os.environ["ASH_BUILD_DATE"]) if os.environ.get("ASH_BUILD_DATE") else dt.date.today()
-    data = {"updated": f"{day.day} {day.strftime('%b %Y')}",
-            "model": "Pangram 4.1", "rows": rows, "base": base, "n_tests": len(ps),
-            "passages": passages, "terms": terms}
+    updated = f"{day.day} {day.strftime('%b %Y')}"
+    hl_by_year = Counter(p["y"] for p in passages)
+    data = {"updated": updated, "model": "Pangram 4.1", "rows": rows, "base": base, "n_tests": len(ps),
+            "hl": {str(r["year"]): hl_by_year.get(r["year"], 0) for r in rows if r["status"] == "scored"},
+            "terms": terms}
+    pas_data = {"updated": updated, "model": "Pangram 4.1",
+                "rows": [{"year": r["year"], "n": r["n"]} for r in rows if r["status"] == "scored"],
+                "passages": passages}
     # Fisher p-values differ in the 16th significant digit between operating systems' math
     # libraries; round computed statistics so the page is byte-identical everywhere
     # (the page shows 2-3 digits; which terms are listed was decided above, unrounded).
@@ -255,31 +262,46 @@ def main():
     for t in terms["words"] + terms["phrases"]:
         for k in ("qa", "qb"):
             t[k] = float(f"{t[k]:.8g}")
-    payload = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
-    # no identifiers may ride along with the passages
-    for leak in ("10.1182/", "blood-20"):
-        if leak in payload:
-            raise SystemExit(f"identifier pattern {leak!r} found in the public payload")
-    html = TEMPLATE.replace("__DATA__", payload.replace("</", "<\\/"))
-    out_dir = os.path.join(ROOT, "public_dashboard"); os.makedirs(out_dir, exist_ok=True)
-    dest = os.path.join(out_dir, "index.html")
-    with open(dest + ".tmp", "w", encoding="utf-8", newline="\n") as f:  # same bytes on every OS
-        f.write(html)
-    os.replace(dest + ".tmp", dest)
+    out_dir = os.path.join(ROOT, "public_dashboard")
+    pages = [("index.html", MAIN_TITLE, MAIN_DESC, MAIN_BODY, data),
+             (os.path.join("passages", "index.html"), PAS_TITLE, PAS_DESC, PAS_BODY, pas_data)]
+    for rel, title, desc, body, d in pages:
+        payload = json.dumps(d, ensure_ascii=False, separators=(",", ":"))
+        # no identifiers may ride along with the passages
+        for leak in ("10.1182/", "blood-20"):
+            if leak in payload:
+                raise SystemExit(f"identifier pattern {leak!r} found in the public payload")
+        html = (HEAD.replace("__TITLE__", title).replace("__DESC__", desc)
+                + body.replace("__DATA__", payload.replace("</", "<\\/")))
+        dest = os.path.join(out_dir, rel)
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        with open(dest + ".tmp", "w", encoding="utf-8", newline="\n") as f:  # same bytes on every OS
+            f.write(html)
+        os.replace(dest + ".tmp", dest)
     for r in rows:
         print(r)
     print(f"passages: {len(passages)} abstracts with highlighted text; "
           f"terms: {len(terms['words'])} words, {len(terms['phrases'])} phrases")
-    print("->", dest, f"({os.path.getsize(dest) / 1e3:.0f} kB)")
+    for rel, *_ in pages:
+        dest = os.path.join(out_dir, rel)
+        print("->", dest, f"({os.path.getsize(dest) / 1e3:.0f} kB)")
 
 
-TEMPLATE = r"""<!doctype html>
+MAIN_TITLE = "AI Text in ASH Abstracts"
+MAIN_DESC = ("How often an AI-text detector flags American Society of Hematology annual-meeting abstracts, "
+             "by year, with every passage it highlighted and the words those passages lean on. Preliminary "
+             "pilot results by Eric Perkey, Frank Wen, Reid Shaw and Max Wen.")
+PAS_TITLE = "Highlighted ASH Passages"
+PAS_DESC = ("Every passage an AI-text detector highlighted in random samples of American Society of "
+            "Hematology annual-meeting abstracts, 2020-2025, shown without titles or authors.")
+
+HEAD = r"""<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>AI Text in ASH Abstracts</title>
-<meta name="description" content="How often an AI-text detector flags American Society of Hematology annual-meeting abstracts, by year, with every passage it highlighted and the words those passages lean on. Preliminary pilot results by Eric Perkey, Frank Wen, Reid Shaw and Max Wen.">
+<title>__TITLE__</title>
+<meta name="description" content="__DESC__">
 <style>
 :root{
   --bg:#fbfaf7; --panel:#ffffff; --ink:#1a1a1a; --ink2:#52514e; --mute:#7a786f; --rule:#e5e2db;
@@ -351,13 +373,14 @@ th{color:var(--mute);font-weight:600;font-size:12.5px}
 .prose ul{padding-left:20px;margin:6px 0 12px}
 .fine{color:var(--mute);font:13.5px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;margin-top:28px;border-top:1px solid var(--rule);padding-top:14px}
 .hit.go{cursor:pointer}
+.golink{display:inline-block;font:600 15px system-ui,-apple-system,"Segoe UI",sans-serif;color:var(--link);margin:4px 0 2px}
 [hidden]{display:none!important}
 /* words and phrases */
 .tabs{display:flex;gap:4px;margin:8px 0 2px;font-family:system-ui,-apple-system,"Segoe UI",sans-serif}
 .tabs button{font:inherit;font-size:14px;padding:5px 12px;border:1px solid var(--rule);border-radius:999px;background:transparent;color:var(--ink2);cursor:pointer}
 .tabs button[aria-selected="true"]{background:var(--chip);color:var(--ink);font-weight:600}
 table.terms td,table.terms th{white-space:normal;vertical-align:middle}
-.termbtn{font:inherit;font-weight:600;font-size:14.5px;color:var(--link);background:none;border:0;padding:0;cursor:pointer;text-align:left}
+.termbtn{font:inherit;font-weight:600;font-size:14.5px;color:var(--link);background:none;border:0;padding:0;cursor:pointer;text-align:left;text-decoration:none}
 .termbtn:hover{text-decoration:underline}
 .sub2{display:block;color:var(--mute);font-size:12.5px;font-weight:400}
 .spark{display:flex;align-items:center;justify-content:flex-end;gap:8px}
@@ -396,7 +419,9 @@ mark.a{background:var(--hl-soft);text-decoration:underline dotted var(--hl-edge)
 @media (max-width:360px){h1{font-size:22px}.spark svg{display:none}.nabs{display:none}table.terms th,table.terms td{padding:7px 3px}}
 </style>
 </head>
-<body>
+"""
+
+MAIN_BODY = r"""<body>
 <div class="wrap">
 <a class="back" href="/">&larr; eperkey.org</a>
 <h1>How much ASH abstract text is AI-written?</h1>
@@ -430,28 +455,10 @@ mark.a{background:var(--hl-soft);text-decoration:underline dotted var(--hl-edge)
   <button class="linkbtn" id="wt-more"></button>
 </section>
 
-<section class="card" id="ex" aria-labelledby="ex-h">
+<section class="card" aria-labelledby="ex-h">
   <h2 id="ex-h">Read the highlighted passages</h2>
   <p class="cap" id="ex-intro"></p>
-  <div class="controls">
-    <select id="f-y" aria-label="Meeting year"></select>
-    <select id="f-l" aria-label="Detector's label for the whole abstract">
-      <option value="">All abstract labels</option>
-      <option value="AI">Entirely AI-written</option>
-      <option value="Mixed">Partly AI-written</option>
-      <option value="Human">Human-written overall</option>
-    </select>
-    <select id="f-s" aria-label="Order">
-      <option value="most">Most highlighted first</option>
-      <option value="least">Least highlighted first</option>
-      <option value="shuffle">Shuffled</option>
-    </select>
-    <input type="search" id="f-q" placeholder="Find a word or phrase" aria-label="Find a word or phrase in the passages" autocomplete="off">
-  </div>
-  <div class="legend"><span><mark class="g">AI-generated</mark></span><span><mark class="a">AI-assisted</mark></span><span><span class="find">search match</span></span></div>
-  <p class="count" id="ex-cnt" aria-live="polite"></p>
-  <div id="ex-list"></div>
-  <div class="pager"><button id="ex-prev">Previous</button><span id="ex-pg"></span><button id="ex-next">Next</button></div>
+  <a class="golink" href="passages/">Open the passage explorer &rarr;</a>
 </section>
 
 <section class="card prose" aria-labelledby="m-h">
@@ -461,7 +468,7 @@ mark.a{background:var(--hl-soft);text-decoration:underline dotted var(--hl-edge)
     <li><b>Sampling.</b> A simple random sample from each year (fixed random seed): <span id="sampling"></span>.</li>
     <li><b>Detector.</b> <span id="mdl2"></span> (Pangram Labs), a commercial AI-text detector. It labels each abstract as human-written, mixed (some passages AI-written or AI-edited) or AI-written. "Flagged" here means mixed or AI-written.</li>
     <li><b>Highlighted passages.</b> The detector also judges each stretch of an abstract (from a sentence to several paragraphs) on its own and labels it human-written, AI-generated or AI-assisted. The highlights are the stretches given one of the last two labels. A few abstracts labeled human-written overall still contain one; they are included.</li>
-    <li><b>Words and phrases.</b> Every single word and run of two or three words with at least 10 uses in the text being compared was tested twice, with Fisher's exact test (two-sided). The first test compares how often a term occurs in the highlighted versus the unhighlighted text of the <span class="era"></span> abstracts, so both sides come from the same years and topics. The second compares how many abstracts contain the term in the latest year versus 2020&ndash;2021. Each test's p-values are adjusted across all terms tested (Benjamini&ndash;Hochberg). Repeats of a word within one abstract make the first test optimistic: a drug name repeated in a single flagged abstract can pass it easily. So a term is listed only if it passes both tests and appears in at least 6 different highlighted abstracts. Terms tied to a kind of study can still pass, and with 250 abstracts a year, rarer style words may not reach significance.</li>
+    <li><b>Words and phrases.</b> Every single word and run of two or three words with at least 10 uses in the text being compared was tested twice, with Fisher's exact test (two-sided). The first test compares how often a term occurs in the highlighted versus the unhighlighted text of the <span class="era"></span> abstracts, so both sides come from the same years and topics. The second compares how many abstracts contain the term in the latest year versus 2020&ndash;2021. Each test's p-values are adjusted across all terms tested (Benjamini&ndash;Hochberg). Repeats of a word within one abstract make the first test optimistic: a drug name repeated in a single flagged abstract can pass it easily. So a term is listed only if it passes both tests, appears in at least 6 different highlighted abstracts and is more than 5 times as common in highlighted as in unhighlighted text. Terms tied to a kind of study can still pass, and with 250 abstracts a year, rarer style words may not reach significance.</li>
     <li><b>Baseline.</b> ASH 2020 and 2021 abstracts were submitted in August of those years, more than a year before ChatGPT launched on 30 November 2022. <span id="basetxt"></span></li>
     <li><b>Statistics.</b> Wilson 95% intervals for each share. Each later year is compared with 2020 and 2021 combined by Fisher's exact test; p-values are adjusted for the number of comparisons (Benjamini&ndash;Hochberg).</li>
   </ul>
@@ -488,14 +495,14 @@ mark.a{background:var(--hl-soft);text-decoration:underline dotted var(--hl-edge)
     <li><b>Disclose, don't ban.</b> Add an AI section to the disclosure form authors already fill in for conflicts of interest: which tool and version, what it did (language editing, translation, drafting text, literature search, code, statistical analysis, figures or data handling) and what the authors checked. Publish it with the abstract, as conflicts of interest are. Disclosed use should not count against an abstract; undisclosed AI writing should. The <a href="https://www.icmje.org/recommendations/browse/artificial-intelligence/ai-use-by-authors.html">ICMJE recommends</a> the same for medical journals: disclosure at submission, and a description of the use in the work itself.</li>
     <li><b>Marking at the source.</b> The European Union already requires it. Under Article 50(2) of the <a href="https://eur-lex.europa.eu/eli/reg/2024/1689/oj">EU AI Act</a>, which has applied since 2 August 2026, providers of generative AI, large language models included, must mark what their systems produce in a machine-readable way, such as a watermark, so that it can be detected as AI-generated, as far as is technically feasible. Systems already on the market have until 2 December 2026. The Commission's <a href="https://digital-strategy.ec.europa.eu/en/news/commission-publishes-code-practice-marking-and-labelling-ai-generated-content">Code of Practice</a> (June 2026) sets out how. China has required visible labels and embedded marks on AI-generated content since September 2025. Marks have limits: rewording or translation can weaken a text watermark, a model run on a researcher's own computer may add none, and the EU rule exempts AI that only assists with standard editing, the same line ASH draws between polishing and writing. Marks can help check a disclosure; they cannot replace one.</li>
     <li><b>Reproducible computation.</b> When AI helps handle or analyze data, someone else should be able to re-run the analysis: the code, a pinned software environment, random seeds, the exact model name and version, the prompts and the saved model outputs. Saved outputs matter because hosted models change and are retired, so a re-run months later may not give the same answer. Code written by an AI model is still code, and it should be shared and run like any other.</li>
-    <li><b>Free to run, not a subscription.</b> Some journals now ask for runnable &ldquo;compute capsules&rdquo;. Several Nature Portfolio journals <a href="https://blogs.nature.com/blog/nature-research-journals-trial-new-tools-to-enhance-code-peer-review-and-publication/">review code through Code Ocean</a>, a company whose capsules run on its own servers, with use beyond a free tier sold by individual and institutional subscription. The idea is right, but whether a paper can be checked should not depend on one company's prices or on a reader's institution paying for access. Free, open options already exist: <a href="https://zenodo.org/">Zenodo</a> (run by CERN) and <a href="https://www.softwareheritage.org/">Software Heritage</a> archive code permanently, a container recipe pins the software environment, and <a href="https://mybinder.org/">mybinder.org</a> runs it in a browser at no cost. Societies, journals and funders could pay to keep this kind of infrastructure free for authors and readers alike.</li>
+    <li><b>Free to run, not a subscription.</b> Some journals now ask for runnable &ldquo;compute capsules&rdquo;. Several Nature Portfolio journals <a href="https://blogs.nature.com/blog/nature-research-journals-trial-new-tools-to-enhance-code-peer-review-and-publication/">review code through Code Ocean</a>, a company whose capsules run on its own servers, with use beyond a free tier sold by individual and institutional subscription. The idea is right, but whether a paper can be checked should not depend on one company's prices or on a reader's institution paying for access. Free options already exist. <a href="https://zenodo.org/">Zenodo</a> (run by CERN) and <a href="https://www.softwareheritage.org/">Software Heritage</a> store code permanently, a Docker file records the exact software versions used, and <a href="https://mybinder.org/">mybinder.org</a> lets anyone rerun an analysis in a web browser at no charge. Societies, journals and funders should cover the cost of keeping these free.</li>
     <li><b>Detectors for monitoring, not for judging individuals.</b> Detectors can misjudge some writers: in <a href="https://doi.org/10.1016/j.patter.2023.100779">one study</a>, popular detectors labeled more than half of essays by non-native English writers as AI-written. Pangram flagged none of the 500 pre-ChatGPT abstracts here, but that does not show it treats every group of writers alike. Detectors suit what this page does, tracking a field in aggregate, not rejecting a single abstract. AI language editing is also a real help to the many ASH authors who write in a second language, and a ban falls hardest on them.</li>
     <li><b>Doing the same here.</b> We plan to release this audit as a free, re-runnable package: the code, a pinned environment and a check that freshly downloaded abstract text matches published fingerprints. The abstracts stay with ASH: they are downloaded again from Crossref rather than redistributed. The detector step is the one part that can only be repeated with a paid Pangram key.</li>
   </ul>
 </section>
 
 <p class="fine">Independent analysis by Eric Perkey, Frank Wen, Reid Shaw and Max Wen; views are the authors' own. Not affiliated with or endorsed by the American Society of Hematology or Pangram Labs. Abstract text &copy; the American Society of Hematology; passages the detector highlighted are quoted for research and commentary.</p>
-<p class="fine">AI use: Claude (Anthropic) helped write the analysis code and draft the text of this page, and Pangram scored the abstracts. The authors are responsible for the content.</p>
+<p class="fine">AI use: the language on this page was generated by Claude (Anthropic) at the authors' direction, and Claude helped write the analysis code. Pangram scored the abstracts. The authors are responsible for the content.</p>
 </div>
 
 <script>
@@ -611,26 +618,15 @@ function draw(){
     hit.addEventListener('focus', () => show(null)); hit.addEventListener('blur', hide);
   });
 }
-// ---- shared helpers for the passage sections ----
-const TERMS = DATA.terms, PAS = DATA.passages;
-const esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-function makeRe(q, exact, flags){
-  q = q.trim(); if (!q) return null;
-  return new RegExp('\\b' + q.split(/\s+/).map(esc).join('\\s+') + (exact ? '\\b' : ''), flags);
-}
-function addText(parent, s, re){
-  if (!re) { parent.appendChild(document.createTextNode(s)); return; }
-  re.lastIndex = 0; let last = 0, m;
-  while ((m = re.exec(s))) {
-    if (!m[0]) { re.lastIndex++; continue; }
-    if (m.index > last) parent.appendChild(document.createTextNode(s.slice(last, m.index)));
-    const f = document.createElement('span'); f.className = 'find'; f.textContent = m[0]; parent.appendChild(f);
-    last = m.index + m[0].length;
-  }
-  if (last < s.length) parent.appendChild(document.createTextNode(s.slice(last)));
-}
-const smooth = () => matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth';
-const toExplorer = () => $('ex').scrollIntoView({behavior: smooth(), block: 'start'});
+// ---- the passage explorer lives on its own page ----
+const TERMS = DATA.terms;
+function goYear(y){ location.href = 'passages/?year=' + y; }
+(function(){
+  const total = scored.reduce((s, r) => s + r.n, 0).toLocaleString('en-US');
+  const nHl = scored.reduce((s, r) => s + DATA.hl[r.year], 0);
+  const parts = scored.map(r => `${DATA.hl[r.year]} of ${r.n} from ${r.year}`).join(', ');
+  $('ex-intro').textContent = `The detector highlighted text in ${nHl} of the ${total} abstracts scored (${parts}). The explorer shows each of those passages without titles or authors; the rest of each abstract is reduced to a word count. Filter by year or label, or search for a word.`;
+})();
 document.querySelectorAll('.era').forEach(e => { e.textContent = `${TERMS.rule.era_from}–${TERMS.latest}`; });
 
 // ---- words and phrases ----
@@ -638,7 +634,7 @@ document.querySelectorAll('.era').forEach(e => { e.textContent = `${TERMS.rule.e
   const R = TERMS.rule, yrs = TERMS.years, SHOW = 12;
   let kind = 'words', all = false;
   const nf = x => x.toLocaleString('en-US');
-  $('w-rule').textContent = `Listed when a term passes two tests after correction for the number of terms tested (Benjamini–Hochberg, q < ${R.q}): it is more common in the highlighted passages than in the unhighlighted text of the same ${R.era_from}–${TERMS.latest} abstracts (${nf(R.n_hl_tests)} terms tested), and more ${TERMS.latest} abstracts use it than ${TERMS.base_label} abstracts (${nf(R.n_year_tests)} terms tested). It must also turn up in at least ${R.abstracts} different highlighted abstracts. Each line is the share of sampled abstracts using the term, by year, on its own scale; the dashed stretch spans 2022, which has no data. Select a term to read the passages that contain it.`;
+  $('w-rule').textContent = `Listed when a term passes two tests after correction for the number of terms tested (Benjamini–Hochberg, q < ${R.q}): it is more common in the highlighted passages than in the unhighlighted text of the same ${R.era_from}–${TERMS.latest} abstracts (${nf(R.n_hl_tests)} terms tested), and more ${TERMS.latest} abstracts use it than ${TERMS.base_label} abstracts (${nf(R.n_year_tests)} terms tested). It must also turn up in at least ${R.abstracts} different highlighted abstracts and be more than ${R.ratio} times as common in the highlighted passages as in the unhighlighted text. Each line is the share of sampled abstracts using the term, by year, on its own scale; the dashed stretch spans 2022, which has no data. Select a term to read the passages that contain it.`;
   const fq = q => { if (q < 0.001) return 'q < 0.001';
     let s = q.toPrecision(2); if (+s >= R.q && q < R.q) s = q.toPrecision(3); return 'q = ' + s; };
   function spark(v){
@@ -662,8 +658,9 @@ document.querySelectorAll('.era').forEach(e => { e.textContent = `${TERMS.rule.e
     const b = t.createTBody();
     list.slice(0, all ? list.length : SHOW).forEach(v => {
       const tr = b.insertRow();
-      const btn = document.createElement('button'); btn.className = 'termbtn'; btn.textContent = v.t;
-      btn.setAttribute('aria-label', `${v.t}: read the passages that contain it`); btn.onclick = () => findTerm(v.t);
+      const btn = document.createElement('a'); btn.className = 'termbtn'; btn.textContent = v.t;
+      btn.href = 'passages/?q=' + encodeURIComponent(v.t) + '&exact=1';
+      btn.setAttribute('aria-label', `${v.t}: read the passages that contain it`);
       tr.insertCell().appendChild(btn);
       const c2 = tr.insertCell(); const r = document.createElement('b'); r.textContent = `${v.r.toFixed(1)}×`;
       const k = document.createElement('span'); k.className = 'sub2'; k.textContent = fq(v.qb);
@@ -686,7 +683,84 @@ document.querySelectorAll('.era').forEach(e => { e.textContent = `${TERMS.rule.e
   render();
 })();
 
-// ---- passage explorer ----
+draw();
+let rt; addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(draw, 120); });
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', draw);
+</script>
+</body>
+</html>
+"""
+
+PAS_BODY = r"""<body>
+<div class="wrap">
+<a class="back" href="../">&larr; How much ASH abstract text is AI-written?</a>
+<h1>Highlighted passages from ASH abstracts</h1>
+<p class="sub">Every passage an AI-text detector highlighted in random samples of American Society of Hematology annual-meeting abstracts.</p>
+<div class="chips"><span class="chip warn">Preliminary pilot &middot; not peer reviewed</span><span class="chip" id="upd"></span><span class="chip" id="mdl"></span></div>
+
+<section class="card" id="ex" aria-labelledby="ex-h">
+  <h2 id="ex-h">Read the highlighted passages</h2>
+  <p class="cap" id="ex-intro"></p>
+  <div class="controls">
+    <select id="f-y" aria-label="Meeting year"></select>
+    <select id="f-l" aria-label="Detector's label for the whole abstract">
+      <option value="">All abstract labels</option>
+      <option value="AI">Entirely AI-written</option>
+      <option value="Mixed">Partly AI-written</option>
+      <option value="Human">Human-written overall</option>
+    </select>
+    <select id="f-s" aria-label="Order">
+      <option value="most">Most highlighted first</option>
+      <option value="least">Least highlighted first</option>
+      <option value="shuffle">Shuffled</option>
+    </select>
+    <input type="search" id="f-q" placeholder="Find a word or phrase" aria-label="Find a word or phrase in the passages" autocomplete="off">
+  </div>
+  <div class="legend"><span><mark class="g">AI-generated</mark></span><span><mark class="a">AI-assisted</mark></span><span><span class="find">search match</span></span></div>
+  <p class="count" id="ex-cnt" aria-live="polite"></p>
+  <div id="ex-list"></div>
+  <div class="pager"><button id="ex-prev">Previous</button><span id="ex-pg"></span><button id="ex-next">Next</button></div>
+</section>
+
+<section class="card prose" aria-labelledby="a-h">
+  <h2 id="a-h">How to read these</h2>
+  <ul>
+    <li>A highlight is the detector's judgment, not proof that AI wrote the text, and it says nothing about whether the science is sound. Using AI to polish English is common and usually allowed.</li>
+    <li>The detector judges each stretch of an abstract on its own. Solid highlights are passages it labeled AI-generated; lighter, dotted ones are AI-assisted. The label next to each abstract is its verdict on the abstract as a whole.</li>
+    <li>Passages are shown without titles, authors, abstract numbers or links, and not in abstract-number order. Trial registration numbers are masked.</li>
+    <li>Methods, statistics and the words these passages lean on are on the <a href="../">main page</a>.</li>
+  </ul>
+</section>
+
+<p class="fine">Independent analysis by Eric Perkey, Frank Wen, Reid Shaw and Max Wen; views are the authors' own. Not affiliated with or endorsed by the American Society of Hematology or Pangram Labs. Abstract text &copy; the American Society of Hematology; passages the detector highlighted are quoted for research and commentary.</p>
+<p class="fine">AI use: the language on this page was generated by Claude (Anthropic) at the authors' direction, and Claude helped write the analysis code. Pangram scored the abstracts. The authors are responsible for the content.</p>
+</div>
+
+<script>
+const DATA = __DATA__;
+const $ = id => document.getElementById(id);
+$('upd').textContent = 'Updated ' + DATA.updated;
+$('mdl').textContent = DATA.model;
+const scored = DATA.rows, PAS = DATA.passages;
+const esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+function makeRe(q, exact, flags){
+  q = q.trim(); if (!q) return null;
+  return new RegExp('\\b' + q.split(/\s+/).map(esc).join('\\s+') + (exact ? '\\b' : ''), flags);
+}
+function addText(parent, s, re){
+  if (!re) { parent.appendChild(document.createTextNode(s)); return; }
+  re.lastIndex = 0; let last = 0, m;
+  while ((m = re.exec(s))) {
+    if (!m[0]) { re.lastIndex++; continue; }
+    if (m.index > last) parent.appendChild(document.createTextNode(s.slice(last, m.index)));
+    const f = document.createElement('span'); f.className = 'find'; f.textContent = m[0]; parent.appendChild(f);
+    last = m.index + m[0].length;
+  }
+  if (last < s.length) parent.appendChild(document.createTextNode(s.slice(last)));
+}
+const smooth = () => matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth';
+const toExplorer = () => $('ex').scrollIntoView({behavior: smooth(), block: 'start'});
+
 const EX = {page: 0, rows: [], exact: false, re: null, PER: 10};
 const LAB = {AI: ['entirely AI-written', '--s1'], Mixed: ['partly AI-written', '--s2'], Human: ['human-written overall', '--axis']};
 PAS.forEach((a, i) => { a.i = i; a.cov = a.nw ? a.hw / a.nw : 0;
@@ -696,10 +770,25 @@ const withHl = y => PAS.filter(a => a.y === y).length;
 (function(){
   const total = scored.reduce((s, r) => s + r.n, 0).toLocaleString('en-US');
   const parts = scored.map(r => `${withHl(r.year)} of ${r.n} from ${r.year}`).join(', ');
-  $('ex-intro').textContent = `The ${PAS.length} abstracts, of ${total} scored, in which the detector highlighted any text (${parts}). Only the highlighted passages are shown; the rest of each abstract is reduced to a word count. A highlight is the detector's judgment, not proof that AI wrote the text, and it says nothing about the science.`;
+  $('ex-intro').textContent = `The detector highlighted text in ${PAS.length} of the ${total} abstracts scored (${parts}). Only the highlighted passages are shown; the rest of each abstract is reduced to a word count.`;
   const fy = $('f-y'); const o = document.createElement('option'); o.value = ''; o.textContent = 'All years'; fy.appendChild(o);
   scored.forEach(r => { const op = document.createElement('option'); op.value = r.year; op.textContent = `${r.year} (${withHl(r.year)} with highlights)`; fy.appendChild(op); });
 })();
+// filters can arrive in the link (from the main page) and are kept in the address bar
+const P = new URLSearchParams(location.search);
+if ([...$('f-y').options].some(o => o.value && o.value === P.get('year'))) $('f-y').value = P.get('year');
+if (['AI', 'Mixed', 'Human'].includes(P.get('label'))) $('f-l').value = P.get('label');
+if (['most', 'least', 'shuffle'].includes(P.get('order'))) $('f-s').value = P.get('order');
+if (P.get('q')) { $('f-q').value = P.get('q').slice(0, 100); EX.exact = P.get('exact') === '1'; }
+function syncUrl(){
+  const u = new URLSearchParams();
+  if ($('f-y').value) u.set('year', $('f-y').value);
+  if ($('f-l').value) u.set('label', $('f-l').value);
+  if ($('f-s').value !== 'most') u.set('order', $('f-s').value);
+  const q = $('f-q').value.trim(); if (q) { u.set('q', q); if (EX.exact) u.set('exact', '1'); }
+  const s = u.toString();
+  try { history.replaceState(null, '', s ? '?' + s : location.pathname); } catch (e) {}
+}
 function filtered(){ return !!($('f-y').value || $('f-l').value || $('f-q').value.trim()); }
 function applyEx(){
   const y = $('f-y').value, l = $('f-l').value, s = $('f-s').value, q = $('f-q').value;
@@ -708,7 +797,7 @@ function applyEx(){
   if (s === 'most') rows.sort((a, b) => b.cov - a.cov || a.i - b.i);
   else if (s === 'least') rows.sort((a, b) => a.cov - b.cov || a.i - b.i);
   else rows.sort((a, b) => a.i - b.i);
-  EX.rows = rows; EX.page = 0; renderEx();
+  EX.rows = rows; EX.page = 0; renderEx(); syncUrl();
 }
 function card(a){
   const art = document.createElement('article'); art.className = 'ab';
@@ -750,17 +839,11 @@ function renderEx(){
   document.querySelector('.pager').hidden = pages === 1;
 }
 function clearEx(){ $('f-y').value = ''; $('f-l').value = ''; $('f-q').value = ''; EX.exact = false; applyEx(); }
-function goYear(y){ $('f-y').value = String(y); $('f-l').value = ''; $('f-q').value = ''; EX.exact = false; applyEx(); toExplorer(); }
-function findTerm(t){ $('f-y').value = ''; $('f-l').value = ''; $('f-q').value = t; EX.exact = true; applyEx(); toExplorer(); }
 ['f-y', 'f-l', 'f-s'].forEach(id => $(id).addEventListener('change', applyEx));
 let tq; $('f-q').addEventListener('input', () => { EX.exact = false; clearTimeout(tq); tq = setTimeout(applyEx, 180); });
 $('ex-prev').onclick = () => { EX.page--; renderEx(); toExplorer(); };
 $('ex-next').onclick = () => { EX.page++; renderEx(); toExplorer(); };
 applyEx();
-
-draw();
-let rt; addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(draw, 120); });
-matchMedia('(prefers-color-scheme: dark)').addEventListener('change', draw);
 </script>
 </body>
 </html>
