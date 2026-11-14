@@ -37,8 +37,8 @@ docker run --rm -e ASH_BUILD_DATE=2026-11-14 -v "$PWD/data:/capsule/data" \
   -v "$PWD/public_dashboard:/capsule/public_dashboard" artificial-ash all
 ```
 
-**Binder**: open the repository on [mybinder.org](https://mybinder.org/), start a terminal, and run
-`python -I reproduce.py selftest`, then `data` and `verify`.
+**Binder** (free, in your browser): [launch it on mybinder.org](https://mybinder.org/v2/gh/etperkey/artificial-ash/HEAD),
+open a terminal (File > New > Terminal), and run `python -I reproduce.py selftest`, then `data` and `verify`.
 
 **Plain Python 3.12**:
 
