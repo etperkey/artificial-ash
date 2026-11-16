@@ -3,7 +3,7 @@
 manifests/results_summary.csv holds, for each year, the number of abstracts scored and
 how many Pangram labeled AI, Mixed or Human, plus the Benjamini-Hochberg q-value of the
 Fisher test against pooled 2020-2021. This re-implements those statistics independently
-of build_dashboard.py.
+of analysis.py.
 
 Usage:
   python -I check_results.py --check      # results/*.scores.jsonl vs the manifest (exit 1 if different)

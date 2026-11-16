@@ -6,8 +6,11 @@ This repository re-runs the analysis behind
 abstracts from each of 2020, 2021, 2023, 2024 and 2025, compared with the pre-ChatGPT years 2020–2021.
 
 It is a "compute capsule" that costs nothing to run: the code, a pinned software environment, and
-checks that tell you whether you got the same answer. It runs on your own computer with Docker or
-Python, in a browser on [mybinder.org](https://mybinder.org/), or on GitHub's free runners.
+checks that tell you whether you got the same answer. It starts from the abstracts as ASH publishes
+them and ends with the study's statistics, tables and figures. It runs on your own computer with
+Docker or Python, in a browser on [mybinder.org](https://mybinder.org/), or on GitHub's free runners.
+A copy of each release, the replay files and the outputs are also at
+[eperkey.org/artificial_ash/capsule/](https://eperkey.org/artificial_ash/capsule/).
 
 ## What you can reproduce, and what you need
 
@@ -15,37 +18,50 @@ Python, in a browser on [mybinder.org](https://mybinder.org/), or on GitHub's fr
 |---|---|---|---|
 | `data` | Downloads every ASH abstract for each year from Crossref, cleans it, draws the random samples (seed 20261113) | Internet, a few minutes, ~400 MB of disk | 5 sample files in `data/samples/` |
 | `verify` | Checks your abstracts against the study's SHA-256 fingerprints, abstract by abstract | `data` | `VERIFIED: same abstracts as the study` |
-| `rehydrate` | Rebuilds the Pangram results from the replay files (text stripped, see below) | `data`, the replay files | `REHYDRATED: 1250 responses, every text hash matched` |
-| `score` | Scores the samples again with Pangram yourself (`--max-usd` caps the total; it refuses to run over rehydrated results) | `data`, a paid Pangram API key (~715,000 words, about $360 at list price) | new Pangram results |
-| `analyze` | Statistics, the two public pages (results, and the passage explorer), and a comparison with the published numbers | results from `rehydrate` or `score` | `RESULTS MATCH the published counts`; with `ASH_BUILD_DATE=2026-11-14`, both pages are byte-identical to the published build |
-| `selftest` | Offline check of the environment: recomputes the published q-values and tests the replay round trip | nothing | `SELFTEST PASSED`, `TEST PASSED` |
+| `replay` | Downloads the study's Pangram results with the abstract text removed (1.7 MB) and checks each file's SHA-256 | Internet | `REPLAY FILES OK` |
+| `rehydrate` | Puts your downloaded text back into the replay files, giving the Pangram results exactly as returned | `data`, `replay` | `REHYDRATED: 1250 responses, every text hash matched` |
+| `score` | Scores the samples again with Pangram yourself, instead of `replay` and `rehydrate` (`--max-usd` caps the total; it refuses to run over rehydrated results) | `data`, a paid Pangram API key (~715,000 words, about $360 at list price) | new Pangram results |
+| `analyze` | Statistics, tables and figures (below), each compared with the published build | results from `rehydrate` or `score` | `RESULTS MATCH the published counts`, then `IDENTICAL` for every output and `ANALYSIS REPRODUCED` |
+| `selftest` | Offline check, no data needed: recomputes the published q-values, tests the replay round trip, and redraws both figures from the published counts | nothing | `SELFTEST PASSED`, `TEST PASSED`, `FIGURE SELFTEST PASSED` |
 
-`all` runs `data`, `verify`, `rehydrate` and `analyze` in a row.
+`all` runs `data`, `verify`, `replay`, `rehydrate` and `analyze` in a row.
+
+## What `analyze` produces
+
+| File | What it is |
+|---|---|
+| `results/figures/figure1_flagged_by_year.svg` (+ `.pdf`, `.png`) | Share of abstracts the detector labeled AI-written or partly AI-written, by meeting year, with 95% intervals and q-values |
+| `results/figures/figure2_ai_rewrites.svg` (+ `.pdf`, `.png`) | How the detector labeled the 2020 abstracts as written and after an AI model rewrote them |
+| `results/tables/by_year.csv` | Figure 1's numbers: labels per year, share flagged, Wilson 95% interval, Fisher exact test against pooled 2020–2021, Benjamini–Hochberg q |
+| `results/tables/terms.csv` | Words and phrases that pass both term tests: more common in the text the detector highlighted, and more common in 2025 than in 2020–2021 |
+| `results/tables/term_tests.json` | The rule for listing a term and how many terms each test covered |
+| `results/tables/ai_rewrites.csv` | Figure 2's numbers |
+| `results/pilot_summary.md` | Per-year summary, including the other outcomes and the 2023–2025 trend |
+
+The tables, the SVG figures and the summary are byte-identical on every platform, and `analyze`
+checks them against `manifests/expected_outputs.json`. The PDF and PNG copies are for convenience
+and are not compared. The capsule does not build the public web page: the page's text is not part of
+the analysis.
 
 ## Run it
 
-**Docker** (the exact environment of the study). Create the output folders first and run the
-container as yourself; otherwise, on Linux, Docker creates them owned by root and the steps
-cannot write to them:
+**Docker** (the exact environment of the study). Create the folders first and run the container as
+yourself; otherwise, on Linux, Docker creates them owned by root and the steps cannot write to them:
 
 ```sh
 docker build -t artificial-ash .
-mkdir -p data results public_dashboard
-run() { docker run --rm --user "$(id -u):$(id -g)" -e ASH_BUILD_DATE=2026-11-14 \
-  -v "$PWD/data:/capsule/data" -v "$PWD/results:/capsule/results" \
-  -v "$PWD/public_dashboard:/capsule/public_dashboard" "$@"; }
-run artificial-ash selftest
-run artificial-ash data
-run artificial-ash verify
-# with the replay files in ./replay:
-run -v "$PWD/replay:/capsule/replay:ro" artificial-ash rehydrate
-run artificial-ash analyze
+mkdir -p data replay results
+run() { docker run --rm --user "$(id -u):$(id -g)" -v "$PWD/data:/capsule/data" \
+  -v "$PWD/replay:/capsule/replay" -v "$PWD/results:/capsule/results" artificial-ash "$@"; }
+run selftest
+run all          # data, verify, replay, rehydrate, analyze; figures land in ./results/figures
 ```
 
 On Windows with Docker Desktop (PowerShell), leave out `--user ...` and write `${PWD}` for `$PWD`.
 
 **Binder** (free, in your browser): [launch it on mybinder.org](https://mybinder.org/v2/gh/etperkey/artificial-ash/HEAD),
-open a terminal (File > New > Terminal), and run `python -I reproduce.py selftest`, then `data` and `verify`.
+open a terminal (File > New > Terminal), and run `python -I reproduce.py selftest`, then
+`python -I reproduce.py all`. The figures appear in `results/figures/`.
 
 **Plain Python 3.12**:
 
@@ -53,8 +69,7 @@ open a terminal (File > New > Terminal), and run `python -I reproduce.py selftes
 python -m venv .venv && . .venv/bin/activate      # Windows: .venv\Scripts\activate
 pip install --require-hashes --no-deps -r requirements.txt
 python -I reproduce.py selftest
-python -I reproduce.py data
-python -I reproduce.py verify
+python -I reproduce.py all
 ```
 
 ## What is not in this repository, and why
@@ -68,7 +83,11 @@ python -I reproduce.py verify
 * **Pangram's responses as returned.** Each response repeats the abstract it scored. The replay
   files keep everything else (labels, scores and the start and end of every judged passage) plus
   hashes, and `rehydrate` puts your own downloaded text back, refusing if a single character differs.
-  The replay files hold no abstract text. They are available from the authors on request.
+  The replay files hold no abstract text. They are published at
+  [eperkey.org/artificial_ash/capsule/](https://eperkey.org/artificial_ash/capsule/)
+  and `replay` downloads them; `manifests/replay_sha256.txt` pins their contents. They list each
+  sampled abstract's DOI with the detector's label. A detector label is a statistical estimate, not
+  proof that any author used AI, and the study reports only aggregates.
 * **A Pangram API key.** Pangram is a commercial detector; re-scoring costs money. The study used
   the `pangram-4.1` model throughout, and Pangram may retire it, which is why the original responses
   are kept.
@@ -76,29 +95,32 @@ python -I reproduce.py verify
 ## Layout
 
 ```
-reproduce.py              one entry point for every step
-scripts/fetch_crossref.py download one year's ASH abstracts (Blood supplement) from Crossref
-scripts/clean.py          keep only the abstract body, by the same rules every year
-scripts/sample.py         seeded simple random sample
-scripts/score_pangram.py  Pangram API client (resumable, budget-capped)
-scripts/pangram_replay.py strip text from Pangram responses / restore it from your download
-scripts/fingerprint.py    write or check the abstract fingerprints
-scripts/summarize.py      per-year summary (results/pilot_summary.md)
-scripts/build_dashboard.py the public pages (public_dashboard/index.html and passages/index.html)
-scripts/check_results.py  compare a run with manifests/results_summary.csv
-manifests/                fingerprints, published counts and q-values, expected output hashes
+reproduce.py                 one entry point for every step
+scripts/fetch_crossref.py    download one year's ASH abstracts (Blood supplement) from Crossref
+scripts/clean.py             keep only the abstract body, by the same rules every year
+scripts/sample.py            seeded simple random sample
+scripts/fingerprint.py       write or check the abstract fingerprints
+scripts/score_pangram.py     Pangram API client (resumable, budget-capped)
+scripts/pangram_replay.py    fetch the replay files; strip text from Pangram responses / restore it
+scripts/summarize.py         per-year summary (results/pilot_summary.md)
+scripts/analysis.py          statistics, tables and figures (results/tables, results/figures)
+scripts/check_results.py     compare a run with manifests/results_summary.csv (independent re-implementation)
+scripts/validation_summary.py  Figure 2's counts from the AI-rewrite run (needs that run's files)
+manifests/                   fingerprints, replay checksums, published counts, expected output hashes
 Dockerfile, requirements.txt, binder/   the pinned environment (Python 3.12.10, hash-locked packages)
 ```
 
 ## Environment
 
 Python 3.12.10 in a Docker base image pinned by digest; NumPy 2.3.5, SciPy 1.17.0, statsmodels
-0.14.6 and their dependencies pinned by version and hash. GitHub Actions rebuilds the image and runs
-the self-test on every change, and re-downloads and verifies the abstracts once a month.
+0.14.6, matplotlib 3.10.8 and their dependencies pinned by version and hash. Figures use the DejaVu
+Sans font that ships with matplotlib, so they look the same on every system. GitHub Actions rebuilds
+the image and runs the self-test on every change (which includes redrawing both figures on Linux and
+comparing them byte for byte), and re-downloads and verifies the abstracts once a month.
 
 ## The second figure (AI rewrites)
 
-The page's second figure tests the detector on AI-rewritten abstracts: each of the 250 sampled 2020
+The second figure tests the detector on AI-rewritten abstracts: each of the 250 sampled 2020
 abstracts was sent once to Claude Opus 5.5 (Anthropic Message Batches API, default settings, no system
 prompt) with the instruction quoted in `manifests/validation_rewrite.json`; 12 requests were declined
 by Anthropic's safety filter and the 238 rewrites were scored with pangram-4.1. The rewrites are copies
@@ -108,6 +130,12 @@ needs your own Anthropic and Pangram keys (about $5 and $65 at list prices).
 
 ## Changes
 
+* **2026-11-15, v0.2.0: analysis outputs; public replay files.** `analyze` now writes the figures and
+  tables (`scripts/analysis.py`) instead of rebuilding the web page, and the page builder is no
+  longer part of the capsule. The statistics are unchanged. The replay files are published, so the
+  whole analysis can be re-run without asking the authors; `replay` downloads them and `all`
+  includes it. matplotlib is added to the pinned environment. The ASH_BUILD_DATE setting is gone:
+  no output carries a date.
 * **2026-11-14, cleaning fix.** The 2025 export often runs section labels into the first sentence
   ("Background Acute…"); the first cleaning rules missed these in about 19% of 2025 abstracts
   against 1–2% in other years. `clean.py` now removes them, plus pasted title lines and short label

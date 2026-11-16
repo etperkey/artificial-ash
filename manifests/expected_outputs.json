@@ -1,9 +1,12 @@
 {
-  "about": "SHA-256 of the outputs built on the study machine from the original Pangram responses. `reproduce.py analyze` compares against these when ASH_BUILD_DATE equals build_date.",
-  "build_date": "2026-11-14",
+  "about": "SHA-256 of the analysis outputs built from the study's Pangram responses. `reproduce.py analyze` compares a run with these; `selftest` rebuilds the figures from the published counts and compares them too. PDF and PNG copies are not compared.",
   "sha256": {
-    "public_dashboard/index.html": "37ab0a0d31d9a6dccf9af3a2047e67a666158b207622336b744a1efb22232a57",
-    "public_dashboard/passages/index.html": "46931e86c070547cc268d866bfffe396eea63b43bbdd7e14f4d68d8b56884d59",
-    "results/pilot_summary.md": "b9ef4d9787160f1bc520c289fa391aadbf106a1ca7fec40da80a68e6d861ae0a"
+    "results/pilot_summary.md": "b9ef4d9787160f1bc520c289fa391aadbf106a1ca7fec40da80a68e6d861ae0a",
+    "results/tables/by_year.csv": "ea76414341660de26e2b8c733bf3dacce392ea9411deb45ae3d030ce7941c59b",
+    "results/tables/terms.csv": "a88d392bfa55c05839f84ab1383a73ceacfa77adddea601d7e4df0fecd457b8d",
+    "results/tables/term_tests.json": "db605d7d2cf61129bd55a9cb79df6d39466c98b8666e1610c740c6c6370f4ae8",
+    "results/tables/ai_rewrites.csv": "4a301372e9739823e41397a3b8cbc4b233b723e4da193b5759d5ea4f856e4834",
+    "results/figures/figure1_flagged_by_year.svg": "ff003b6671bf0535dabb824a0fa1f4ed81a5e37105697848f08a496fea3239ca",
+    "results/figures/figure2_ai_rewrites.svg": "9bc0001dd858c366cd393054df7b8e56e3a2527416b8ccdeb2829b108c84440f"
   }
 }

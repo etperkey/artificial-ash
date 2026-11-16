@@ -2,14 +2,14 @@
 
   python -I reproduce.py data        download ASH abstracts from Crossref, clean them, draw the samples
   python -I reproduce.py verify      prove the downloaded abstracts are the ones the study analyzed
-  python -I reproduce.py rehydrate   rebuild the Pangram results from the stripped replay files
+  python -I reproduce.py replay      download the study's Pangram results (no abstract text) and check them
+  python -I reproduce.py rehydrate   rebuild the Pangram results from the replay files and your download
   python -I reproduce.py score       re-score the samples yourself (needs a paid PANGRAM_API_KEY)
-  python -I reproduce.py analyze     statistics, the dashboard page, and a check against the published numbers
-  python -I reproduce.py all         data + verify + rehydrate + analyze
-  python -I reproduce.py selftest    quick offline check of the software environment
+  python -I reproduce.py analyze     statistics, tables and figures, and a check against the published ones
+  python -I reproduce.py all         data + verify + replay + rehydrate + analyze
+  python -I reproduce.py selftest    quick offline check: statistics, figures and the replay round trip
 
 Options: --replay DIR (default replay/), --max-usd N for `score`, --years 2020 2021 ...
-Set ASH_BUILD_DATE=YYYY-MM-DD to stamp the page with a fixed date (needed for a byte-for-byte match).
 """
 import argparse
 import glob
@@ -88,27 +88,23 @@ def step_analyze():
     if not scores:
         sys.exit("no results yet: run `reproduce.py rehydrate` (or `score`) first")
     run(os.path.join(S, "summarize.py"), *scores)
-    run(os.path.join(S, "build_dashboard.py"))
+    run(os.path.join(S, "analysis.py"))
     run(os.path.join(S, "check_results.py"), "--check")
-    exp_path = os.path.join(ROOT, "manifests", "expected_outputs.json")
-    if os.path.exists(exp_path):
-        exp = json.load(open(exp_path, encoding="utf-8"))
-        if os.environ.get("ASH_BUILD_DATE") != exp["build_date"]:
-            print(f"(page not compared byte for byte: set ASH_BUILD_DATE={exp['build_date']} to do that)")
-            return
-        bad = 0
-        for rel, want in exp["sha256"].items():
-            got = sha_file(os.path.join(ROOT, rel))
-            print(f"{rel}: {'IDENTICAL to the published build' if got == want else 'DIFFERENT (' + got[:12] + ')'}")
-            bad += got != want
-        if bad:
-            sys.exit(1)
+    exp = json.load(open(os.path.join(ROOT, "manifests", "expected_outputs.json"), encoding="utf-8"))
+    bad = 0
+    for rel, want in exp["sha256"].items():
+        got = sha_file(os.path.join(ROOT, rel))
+        print(f"{rel}: {'IDENTICAL to the published build' if got == want else 'DIFFERENT (' + got[:12] + ')'}")
+        bad += got != want
+    if bad:
+        sys.exit(1)
+    print("ANALYSIS REPRODUCED: tables and figures in results/tables and results/figures")
 
 
 def main():
     sys.stdout.reconfigure(encoding="utf-8")
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("step", choices=("data", "verify", "rehydrate", "score", "analyze", "all", "selftest"))
+    ap.add_argument("step", choices=("data", "verify", "replay", "rehydrate", "score", "analyze", "all", "selftest"))
     ap.add_argument("--years", type=int, nargs="+", default=YEARS)
     ap.add_argument("--replay", default=os.path.join(ROOT, "replay"))
     ap.add_argument("--max-usd", type=float, default=0.0)
@@ -117,6 +113,8 @@ def main():
         step_data(a.years)
     if a.step in ("verify", "all"):
         run(os.path.join(S, "fingerprint.py"), "--check")
+    if a.step in ("replay", "all"):
+        run(os.path.join(S, "pangram_replay.py"), "fetch", "--replay", a.replay)
     if a.step in ("rehydrate", "all"):
         run(os.path.join(S, "pangram_replay.py"), "rehydrate", "--replay", a.replay)
     if a.step == "score":
@@ -126,6 +124,7 @@ def main():
     if a.step == "selftest":
         run(os.path.join(S, "check_results.py"), "--selftest")
         run(os.path.join(ROOT, "tests", "test_replay.py"))
+        run(os.path.join(S, "analysis.py"), "--selftest")
 
 
 if __name__ == "__main__":

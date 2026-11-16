@@ -10,13 +10,17 @@ them. `strip` removes every piece of text and keeps what is needed to restore it
     text it scored can be rebuilt from the cleaned abstract
   * window start_index / end_index, which Pangram already reports
 
+`fetch` downloads the stripped files the study published (eperkey.org/artificial_ash/capsule/replay/)
+and keeps each only if its SHA-256 matches manifests/replay_sha256.txt.
+
 `rehydrate` takes the stripped files plus your own data/samples/ (rebuilt from Crossref
 by `reproduce.py data`) and writes results/*.raw.jsonl and results/*.scores.jsonl exactly
 as score_pangram.py would have, refusing if any hash does not match.
 
 Usage:
-  python -I pangram_replay.py strip      --results results --out replay       # maintainer
+  python -I pangram_replay.py fetch      --replay replay                      # anyone
   python -I pangram_replay.py rehydrate  --replay replay   --results results  # anyone with the replay files
+  python -I pangram_replay.py strip      --results results --out replay       # maintainer (also writes the checksums)
 """
 import argparse
 import csv
@@ -29,6 +33,8 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.join(HERE, "..")
 MODEL = "pangram-4.1"
+URL = "https://eperkey.org/artificial_ash/capsule/replay/"   # where the study publishes the replay files
+SUMS = os.path.join(ROOT, "manifests", "replay_sha256.txt")
 KEEP = ("version", "headline", "prediction_short", "fraction_ai", "fraction_ai_assisted",
         "fraction_human", "num_ai_segments", "num_ai_assisted_segments", "num_human_segments")
 
@@ -101,6 +107,48 @@ def strip(results, out, root):
             if samples[r["id"]]["text"][:60] in blob:
                 raise SystemExit(f"abstract text leaked into {dest}")
         print(f"{name}: {len(recs)} responses stripped -> {dest}")
+    write_sums(out)
+
+
+def file_sha(p):
+    return hashlib.sha256(open(p, "rb").read()).hexdigest()
+
+
+def write_sums(replay):
+    """Maintainer: record the SHA-256 of each replay file (sha256sum format) for `fetch`."""
+    lines = [f"{file_sha(p)}  {os.path.basename(p)}\n"
+             for p in sorted(glob.glob(os.path.join(replay, "*.replay.jsonl")))]
+    with open(SUMS + ".tmp", "w", encoding="utf-8", newline="\n") as f:
+        f.writelines(lines)
+    os.replace(SUMS + ".tmp", SUMS)
+    print(f"{len(lines)} checksums -> {SUMS}")
+
+
+def fetch(replay, url):
+    """Download the published replay files and keep each only if its SHA-256 matches the manifest."""
+    import urllib.request
+    want = {}
+    for line in open(SUMS, encoding="utf-8"):
+        if line.strip():
+            h, name = line.split()
+            want[name.lstrip("*")] = h
+    os.makedirs(replay, exist_ok=True)
+    for name, h in want.items():
+        dest = os.path.join(replay, name)
+        if os.path.exists(dest) and file_sha(dest) == h:
+            print(f"{name}: already here, checksum OK")
+            continue
+        req = urllib.request.Request(url + name, headers={"User-Agent": "artificial-ash-capsule"})
+        with urllib.request.urlopen(req, timeout=120) as r:
+            body = r.read()
+        got = hashlib.sha256(body).hexdigest()
+        if got != h:
+            raise SystemExit(f"{name}: checksum {got[:12]}… does not match the manifest ({h[:12]}…); not saved")
+        with open(dest + ".tmp", "wb") as f:
+            f.write(body)
+        os.replace(dest + ".tmp", dest)
+        print(f"{name}: downloaded, checksum OK ({len(body) / 1e3:.0f} kB)")
+    print(f"REPLAY FILES OK: {len(want)} files match manifests/replay_sha256.txt")
 
 
 def rehydrate(replay, results, root, expect):
@@ -177,7 +225,8 @@ def rebuild_window(w, text):
 def main():
     sys.stdout.reconfigure(encoding="utf-8")
     ap = argparse.ArgumentParser()
-    ap.add_argument("cmd", choices=("strip", "rehydrate"))
+    ap.add_argument("cmd", choices=("fetch", "strip", "rehydrate"))
+    ap.add_argument("--url", default=URL, help="fetch: base URL of the published replay files")
     ap.add_argument("--results", default=os.path.join(ROOT, "results"))
     ap.add_argument("--replay", default=os.path.join(ROOT, "replay"))
     ap.add_argument("--out", default=os.path.join(ROOT, "replay"))
@@ -185,7 +234,9 @@ def main():
     ap.add_argument("--expect", default=os.path.join(ROOT, "manifests", "results_summary.csv"),
                     help="per-year counts the restored set must match ('none' to skip; tests only)")
     a = ap.parse_args()
-    if a.cmd == "strip":
+    if a.cmd == "fetch":
+        fetch(a.replay, a.url)
+    elif a.cmd == "strip":
         strip(a.results, a.out, a.root)
     else:
         rehydrate(a.replay, a.results, a.root, a.expect)

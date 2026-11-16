@@ -1,7 +1,8 @@
 cff-version: 1.2.0
 message: "If you use this code, please cite it as below."
 title: "Artificial ASH: reproducible audit of AI-written text in American Society of Hematology abstracts"
-version: 0.1.0
+version: 0.2.0
+date-released: 2026-11-15
 license: MIT
 repository-code: "https://github.com/etperkey/artificial-ash"
 url: "https://eperkey.org/artificial_ash/"
