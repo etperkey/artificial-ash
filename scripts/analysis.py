@@ -350,7 +350,9 @@ def q_text(q):
 
 def save(fig, stem):
     os.makedirs(os.path.dirname(stem), exist_ok=True)
-    fig.savefig(stem + ".svg", metadata={"Date": None})
+    svg = io.StringIO()  # matplotlib writes SVG in text mode (CRLF on Windows); write LF on every OS
+    fig.savefig(svg, format="svg", metadata={"Date": None})
+    write_text(stem + ".svg", svg.getvalue())
     fig.savefig(stem + ".pdf", metadata={"CreationDate": None, "ModDate": None})
     fig.savefig(stem + ".png", dpi=200, metadata={"Software": None})
 
