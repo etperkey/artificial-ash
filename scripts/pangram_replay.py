@@ -20,7 +20,8 @@ as score_pangram.py would have, refusing if any hash does not match.
 Usage:
   python -I pangram_replay.py fetch      --replay replay                      # anyone
   python -I pangram_replay.py rehydrate  --replay replay   --results results  # anyone with the replay files
-  python -I pangram_replay.py strip      --results results --out replay       # maintainer (also writes the checksums)
+  python -I pangram_replay.py strip      --results results --out replay       # maintainer
+  python -I pangram_replay.py sums       --replay replay                      # maintainer: write the checksums
 """
 import argparse
 import csv
@@ -107,7 +108,6 @@ def strip(results, out, root):
             if samples[r["id"]]["text"][:60] in blob:
                 raise SystemExit(f"abstract text leaked into {dest}")
         print(f"{name}: {len(recs)} responses stripped -> {dest}")
-    write_sums(out)
 
 
 def file_sha(p):
@@ -115,7 +115,8 @@ def file_sha(p):
 
 
 def write_sums(replay):
-    """Maintainer: record the SHA-256 of each replay file (sha256sum format) for `fetch`."""
+    """Maintainer, after `strip` and before publishing: record the SHA-256 of each replay file
+    (sha256sum format) in manifests/replay_sha256.txt, which `fetch` checks downloads against."""
     lines = [f"{file_sha(p)}  {os.path.basename(p)}\n"
              for p in sorted(glob.glob(os.path.join(replay, "*.replay.jsonl")))]
     with open(SUMS + ".tmp", "w", encoding="utf-8", newline="\n") as f:
@@ -225,7 +226,7 @@ def rebuild_window(w, text):
 def main():
     sys.stdout.reconfigure(encoding="utf-8")
     ap = argparse.ArgumentParser()
-    ap.add_argument("cmd", choices=("fetch", "strip", "rehydrate"))
+    ap.add_argument("cmd", choices=("fetch", "strip", "sums", "rehydrate"))
     ap.add_argument("--url", default=URL, help="fetch: base URL of the published replay files")
     ap.add_argument("--results", default=os.path.join(ROOT, "results"))
     ap.add_argument("--replay", default=os.path.join(ROOT, "replay"))
@@ -238,6 +239,8 @@ def main():
         fetch(a.replay, a.url)
     elif a.cmd == "strip":
         strip(a.results, a.out, a.root)
+    elif a.cmd == "sums":
+        write_sums(a.replay)
     else:
         rehydrate(a.replay, a.results, a.root, a.expect)
 
