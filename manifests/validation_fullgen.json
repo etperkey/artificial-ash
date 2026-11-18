@@ -1,0 +1,70 @@
+{
+  "arm": "fullgen_claude_opus55_2025",
+  "date": "2026-11-18",
+  "source_year": 2025,
+  "source": "the first 115 abstracts of the ASH 2025 sample (random order), as cleaned for the study",
+  "generator": {
+    "model": "claude-opus-5-5",
+    "model_name": "Claude Opus 5.5",
+    "interface": "POST /v1/messages",
+    "effort": "medium",
+    "system_prompt": null,
+    "prompt_notes": "Read the conference abstract below and extract its content as terse working notes. List, as short bullet fragments: the question or aim; the study design, population and methods; every result with its exact numbers, units and statistics; and the authors' conclusion. Keep every number, drug name, gene name and trial name exactly as written. Use fragments, not sentences, and do not copy sentences from the abstract. Reply with the notes only.",
+    "prompt_write": "Write the body of an abstract for the American Society of Hematology annual meeting from the study notes below. Report every item in the notes, with all numbers exactly as given, and do not add findings or numbers that are not in the notes. Write about {n_words} words of plain prose in paragraphs: no title, no author list, no section headings or labels, no bullet points, no references. Reply with the abstract text only.",
+    "prompt_sha256": {
+      "PROMPT_NOTES.txt": "93afcf9381ff563d4a304f582ed63e37d556062f4d1667adf03960b9d409f28e",
+      "PROMPT_WRITE.txt": "9c440323ab6901b186d063aa4545df6504f2b7b1d16f219e4bae029be053c438"
+    }
+  },
+  "detector": "pangram-4.1",
+  "n_candidates": 115,
+  "n_refused": 10,
+  "n_refused_notes_step": 7,
+  "n_refused_write_step": 3,
+  "n_other_incomplete": 0,
+  "refusal_categories": {
+    "None": 10
+  },
+  "n_complete": 105,
+  "n_scored": 100,
+  "labels": {
+    "AI": 20,
+    "Mixed": 37,
+    "Human": 43
+  },
+  "flagged_ci95": [
+    0.4722,
+    0.6627
+  ],
+  "sources_same_abstracts": {
+    "AI": 8,
+    "Mixed": 23,
+    "Human": 69
+  },
+  "by_source_label": {
+    "AI": {
+      "AI": 7,
+      "Mixed": 1,
+      "Human": 0
+    },
+    "Mixed": {
+      "AI": 13,
+      "Mixed": 6,
+      "Human": 4
+    },
+    "Human": {
+      "AI": 0,
+      "Mixed": 30,
+      "Human": 39
+    }
+  },
+  "share_ai_median": 0.1746,
+  "windows": {
+    "Human Written": 665,
+    "AI-Assisted": 90,
+    "AI-Generated": 346
+  },
+  "length_ratio_median": 0.98,
+  "wording_kept_median": 0.124,
+  "wording_kept_max": 0.34
+}

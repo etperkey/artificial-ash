@@ -1,7 +1,7 @@
 """Statistics, tables and figures of the ASH abstract AI-text audit, computed from the Pangram results.
 
 Reads results/*.scores.jsonl and results/*.raw.jsonl (from `reproduce.py rehydrate` or `score`)
-and manifests/validation_rewrite.json. Writes:
+and manifests/validation_rewrite.json and validation_fullgen.json. Writes:
 
   results/tables/by_year.csv         Figure 1 numbers: Pangram labels per year, share flagged
                                      (AI-written or partly AI-written) with a Wilson 95% interval,
@@ -10,17 +10,20 @@ and manifests/validation_rewrite.json. Writes:
   results/tables/terms.csv           words and phrases that pass both term tests (see build_terms)
   results/tables/term_tests.json     the listing rule and the size of each BH family
   results/tables/ai_rewrites.csv     Figure 2 numbers
+  results/tables/ai_written_controls.csv   Figure 3 numbers
   results/figures/figure1_flagged_by_year.svg / .pdf / .png
   results/figures/figure2_ai_rewrites.svg / .pdf / .png
+  results/figures/figure3_ai_written_controls.svg / .pdf / .png
 
 The tables and SVG figures are byte-identical on every platform; reproduce.py compares them with
 manifests/expected_outputs.json. The PDF and PNG copies are for convenience and are not compared.
-Figure 2 is drawn from counts in manifests/validation_rewrite.json: the AI rewrites are copies of
+Figures 2 and 3 are drawn from counts in manifests/validation_rewrite.json and
+manifests/validation_fullgen.json: the AI rewrites and the AI-written controls are derived from
 ASH's abstracts and are not published.
 
 Usage:
   python -I analysis.py                    # from results/
-  python -I analysis.py --selftest         # no data needed: rebuild Figure 1, Figure 2 and their
+  python -I analysis.py --selftest         # no data needed: rebuild the three figures and their
                                            # tables from the published counts and compare
   python -I analysis.py --write-expected   # maintainer: record output hashes in the manifest
 """
@@ -44,7 +47,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.normpath(os.path.join(HERE, ".."))
 BASELINE_YEARS = (2020, 2021)     # pooled pre-ChatGPT baseline
 FIRST_YEAR = 2020
-FULL_N = 250                      # planned per-year sample
+FULL_N = 500                      # planned per-year sample
 NO_TEXT = {2022: "No abstract text in Crossref"}
 MODEL = "Pangram 4.1"
 
@@ -59,10 +62,13 @@ WORD_RE = re.compile(r"[a-z]{2,}(?:['\-][a-z]+)*")
 
 OUTPUTS = ("results/pilot_summary.md",
            "results/tables/by_year.csv", "results/tables/terms.csv", "results/tables/term_tests.json",
-           "results/tables/ai_rewrites.csv",
-           "results/figures/figure1_flagged_by_year.svg", "results/figures/figure2_ai_rewrites.svg")
+           "results/tables/ai_rewrites.csv", "results/tables/ai_written_controls.csv",
+           "results/figures/figure1_flagged_by_year.svg", "results/figures/figure2_ai_rewrites.svg",
+           "results/figures/figure3_ai_written_controls.svg")
 SELFTEST_OUTPUTS = ("results/tables/by_year.csv", "results/tables/ai_rewrites.csv",
-                    "results/figures/figure1_flagged_by_year.svg", "results/figures/figure2_ai_rewrites.svg")
+                    "results/tables/ai_written_controls.csv",
+                    "results/figures/figure1_flagged_by_year.svg", "results/figures/figure2_ai_rewrites.svg",
+                    "results/figures/figure3_ai_written_controls.svg")
 EXPECTED = os.path.join(ROOT, "manifests", "expected_outputs.json")
 
 
@@ -236,12 +242,30 @@ def load_validation():
     return json.load(open(os.path.join(ROOT, "manifests", "validation_rewrite.json"), encoding="utf-8"))
 
 
+def load_fullgen():
+    return json.load(open(os.path.join(ROOT, "manifests", "validation_fullgen.json"), encoding="utf-8"))
+
+
+SOURCE_LABEL = {"Human": "human-written", "Mixed": "partly AI-written", "AI": "AI-written"}
+
+
+def fullgen_bars(v):
+    """Figure 3's bars: all controls, then the controls split by the label the detector gave the
+    abstract each one was based on. (key, {AI, Mixed, Human} counts)."""
+    return [("all", v["labels"])] + [(k, v["by_source_label"][k]) for k in ("Human", "Mixed", "AI")]
+
+
 # ---------------------------------------------------------------- tables
 
 def g8(x):
     """8 significant digits: Fisher p-values differ in the 16th digit between operating systems.
     Values below 1e-12 are float dust (Wilson's lower bound at 0 of n) and are written as 0."""
     return "" if x is None else ("0" if abs(x) < 1e-12 else f"{x:.8g}")
+
+
+def gp(x):
+    """p- and q-values: 8 significant digits however small (a p-value is never written as 0)."""
+    return "" if x is None else f"{x:.8g}"
 
 
 def write_text(path, text):
@@ -270,7 +294,7 @@ def table_by_year(rows, base):
         note = "baseline" if r.get("is_base") else ("partial sample" if r["partial"] else "")
         out.append([r["year"], r["n"], r["ai"], r["mixed"], r["n"] - r["flag"], r["flag"],
                     f"{100 * r['flag'] / r['n']:.1f}", g8(100 * r["lo"]), g8(100 * r["hi"]),
-                    g8(r.get("p")), g8(r.get("q")), note])
+                    gp(r.get("p")), gp(r.get("q")), note])
         if r["year"] == BASELINE_YEARS[-1]:
             out.append([base["label"].replace("–", "-"), base["n"], "", "", base["n"] - base["flag"], base["flag"],
                         f"{100 * base['flag'] / base['n']:.1f}", g8(100 * base["lo"]), g8(100 * base["hi"]),
@@ -287,7 +311,7 @@ def table_terms(terms):
     out = []
     for kind in ("words", "phrases"):
         for t in terms[kind]:
-            out.append([kind[:-1], t["t"], t["k"], t["h"], t["u"], t["r"], g8(t["qb"]), g8(t["qa"]), t["b"]]
+            out.append([kind[:-1], t["t"], t["k"], t["h"], t["u"], t["r"], gp(t["qb"]), gp(t["qa"]), t["b"]]
                        + t["s"])
     return csv_text(header, out)
 
@@ -315,6 +339,29 @@ def table_rewrites(v):
         [f"rewritten by {v['generator']['model_name']}", n, L["AI"], L["Mixed"], L["Human"],
          f"{100 * (L['AI'] + L['Mixed']) / n:.1f}", g8(100 * lo), g8(100 * hi),
          f"{v['n_requested']} requested, {v['n_refused']} declined by Anthropic's safety filter"]])
+
+
+def table_fullgen(v):
+    header = ["abstracts", "n_scored", "ai_written", "partly_ai_written", "human_written", "pct_flagged",
+              "ci95_low_pct", "ci95_high_pct", "note"]
+    S = v["sources_same_abstracts"]
+    ns = S["AI"] + S["Mixed"] + S["Human"]
+    out = [[f"source abstracts as written (ASH {v['source_year']})", ns, S["AI"], S["Mixed"], S["Human"],
+            f"{100 * (S['AI'] + S['Mixed']) / ns:.1f}", "", "", "the abstracts the controls were based on"]]
+    for key, c in fullgen_bars(v):
+        n = c["AI"] + c["Mixed"] + c["Human"]
+        flag = c["AI"] + c["Mixed"]
+        lo, hi = proportion_confint(flag, n, method="wilson")
+        if key == "all":
+            name = f"all controls written by {v['generator']['model_name']}"
+            note = (f"{v['n_candidates']} source abstracts tried, {v['n_refused']} declined by Anthropic's "
+                    f"safety filter, the first {v['n_scored']} completed used")
+        else:
+            name = f"controls based on an abstract labeled {SOURCE_LABEL[key]}"
+            note = ""
+        out.append([name, n, c["AI"], c["Mixed"], c["Human"], f"{100 * flag / n:.1f}",
+                    g8(100 * lo), g8(100 * hi), note])
+    return csv_text(header, out)
 
 
 # ---------------------------------------------------------------- figures
@@ -455,9 +502,54 @@ def figure2(v, stem):
     fig.text(0.03, 0.955, "How the detector labels abstracts rewritten by AI",
              fontsize=11, fontweight="bold", ha="left", va="top")
     fig.text(0.03, 0.875, f"Detector: {MODEL}.", fontsize=8.5, color=MUTE, ha="left", va="top")
-    fig.text(0.03, 0.035, f"{name} rewrote each of the {v['n_requested']} sampled 2020 abstracts in its own words, "
+    fig.text(0.03, 0.035, f"{name} rewrote the first {v['n_requested']} abstracts of the 2020 sample in its own words, "
              f"keeping every fact;\nAnthropic's safety filter declined {v['n_refused']}. "
              f"Both bars show the same {n} abstracts.",
+             fontsize=7.5, color=MUTE, ha="left", va="bottom", linespacing=1.4)
+    save(fig, stem)
+    plt.close(fig)
+
+
+def figure3(v, stem):
+    plt = plt_setup()
+    from matplotlib.patches import Patch
+    name = v["generator"]["model_name"]
+    bars = fullgen_bars(v)
+    ys = [3.45, 2.0, 1.0, 0.0]        # a gap between the all-controls bar and the three subgroups
+    fig = plt.figure(figsize=(7.0, 4.0))
+    ax = fig.add_axes([0.36, 0.27, 0.59, 0.47])
+    labels = []
+    for y, (key, c) in zip(ys, bars):
+        n = c["AI"] + c["Mixed"] + c["Human"]
+        labels.append(f"All controls\n({n} abstracts)" if key == "all"
+                      else f"Source labeled\n{SOURCE_LABEL[key]} ({n})")
+        left = 0.0
+        for k, col, dark in (("AI", C_AI, True), ("Mixed", C_MIXED, True), ("Human", C_HUMAN, False)):
+            w = c[k] / n
+            if not w:
+                continue
+            ax.barh(y, w, 0.58, left=left, color=col, linewidth=0, zorder=2)
+            if w >= 0.08:
+                ax.text(left + w / 2, y, f"{100 * w:.1f}%", ha="center", va="center", fontsize=9,
+                        fontweight="bold", color="white" if dark else INK, zorder=3)
+            left += w
+    ax.set_yticks(ys, labels, fontsize=9)
+    ax.set_xlim(0, 1)
+    ax.set_ylim(-0.55, ys[0] + 0.55)
+    ax.set_xticks([0, 0.25, 0.5, 0.75, 1], ["0%", "25%", "50%", "75%", "100%"])
+    for s in ("top", "right", "left"):
+        ax.spines[s].set_visible(False)
+    ax.tick_params(axis="y", length=0)
+    ax.legend(handles=[Patch(color=C_AI, label="AI-written"), Patch(color=C_MIXED, label="Partly AI-written"),
+                       Patch(color=C_HUMAN, label="Human-written")],
+              loc="lower left", bbox_to_anchor=(0, 1.02), ncol=3, frameon=False, fontsize=8.5, handlelength=1.4)
+    fig.text(0.03, 0.965, "How the detector labels abstracts written entirely by AI",
+             fontsize=11, fontweight="bold", ha="left", va="top")
+    fig.text(0.03, 0.905, f"Detector: {MODEL}. Lower three bars: grouped by how the detector labeled the source abstract.",
+             fontsize=8.5, color=MUTE, ha="left", va="top")
+    fig.text(0.03, 0.03, f"{name} turned each sampled {v['source_year']} abstract into notes, then wrote a new "
+             f"abstract from the notes alone.\n{v['n_candidates']} abstracts were tried; Anthropic's safety filter "
+             f"declined {v['n_refused']}; the first {v['n_scored']} completed are the controls.",
              fontsize=7.5, color=MUTE, ha="left", va="bottom", linespacing=1.4)
     save(fig, stem)
     plt.close(fig)
@@ -472,6 +564,9 @@ def write_counts_outputs(rows, base, root):
     figure1([r for r in rows if r["status"] != "pending"], base,
             os.path.join(root, "results", "figures", "figure1_flagged_by_year"))
     figure2(v, os.path.join(root, "results", "figures", "figure2_ai_rewrites"))
+    c = load_fullgen()
+    write_text(os.path.join(root, "results", "tables", "ai_written_controls.csv"), table_fullgen(c))
+    figure3(c, os.path.join(root, "results", "figures", "figure3_ai_written_controls"))
 
 
 def sha_file(p):

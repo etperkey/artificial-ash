@@ -22,8 +22,8 @@ import sys
 ROOT = os.path.dirname(os.path.abspath(__file__))
 S = os.path.join(ROOT, "scripts")
 YEARS = (2020, 2021, 2023, 2024, 2025)   # 2022: Crossref has no abstract text
-SAMPLE_N, SEED = 500, 20261113           # random order; the first SCORED_N rows were scored
-SCORED_N = 250
+SAMPLE_N, SEED = 500, 20261113           # random order
+SCORED_N = 500                           # every sampled abstract is scored (v0.2.0 scored the first 250)
 USD_PER_100_WORDS = 0.05                 # Pangram list price (2026-11), as in score_pangram.py
 
 

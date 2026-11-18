@@ -1,12 +1,14 @@
 {
   "about": "SHA-256 of the analysis outputs built from the study's Pangram responses. `reproduce.py analyze` compares a run with these; `selftest` rebuilds the figures from the published counts and compares them too. PDF and PNG copies are not compared.",
   "sha256": {
-    "results/pilot_summary.md": "b9ef4d9787160f1bc520c289fa391aadbf106a1ca7fec40da80a68e6d861ae0a",
-    "results/tables/by_year.csv": "ea76414341660de26e2b8c733bf3dacce392ea9411deb45ae3d030ce7941c59b",
-    "results/tables/terms.csv": "a88d392bfa55c05839f84ab1383a73ceacfa77adddea601d7e4df0fecd457b8d",
-    "results/tables/term_tests.json": "db605d7d2cf61129bd55a9cb79df6d39466c98b8666e1610c740c6c6370f4ae8",
+    "results/pilot_summary.md": "3baae6fa8dc8bc5d559261a4e4368c5036d7bf3c959c53511458429e3a412833",
+    "results/tables/by_year.csv": "3d259f8bf1df7aeeb648c2a43c137d0322495384e8642fc8da3805ff632a07e0",
+    "results/tables/terms.csv": "613aff544ed9192f919aa68d4747842f143a7f5c5e20dbecbb2a7baac517891a",
+    "results/tables/term_tests.json": "cf58f4c8427e7c4ddca2b2ec9ed6c6a8151ac13ff26a9a8da5393598af269001",
     "results/tables/ai_rewrites.csv": "4a301372e9739823e41397a3b8cbc4b233b723e4da193b5759d5ea4f856e4834",
-    "results/figures/figure1_flagged_by_year.svg": "3b892d507e6a28143f4e9d81502010d6f3c926c1749214f35896df50d755266e",
-    "results/figures/figure2_ai_rewrites.svg": "cc72a69fd064143609156790b874b179bfbe73e702a9bce085658c369e94f27c"
+    "results/tables/ai_written_controls.csv": "86ebae9a340e83b3de0c031258535ae7588805ea90ed2cdedc8b634d1d3df5f0",
+    "results/figures/figure1_flagged_by_year.svg": "07ae54ace2cee08b830c6758809cc147cdd5eed0d862ee69ab1fcaecb8995ab1",
+    "results/figures/figure2_ai_rewrites.svg": "852185678ae7fb044873c44318dce087184b33004f70922dfbc3f3020c743740",
+    "results/figures/figure3_ai_written_controls.svg": "d01c464bc787baac39849ad030eb54a34a8f05ec8967848b1e2551d8f3594245"
   }
 }
